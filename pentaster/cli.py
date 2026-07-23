@@ -17,6 +17,7 @@ from .report import save_report
 from .results import save_results
 from .runner import DockerRunner
 from .scope import ScopeError, ScopeGuard
+from .solvers import run_solvers
 from .workflow import load_workflow
 
 app = typer.Typer(add_completion=False, help="Pentaster — orchestrateur de pentest web.")
@@ -173,6 +174,64 @@ def _print_summary(results: dict) -> None:
     for o in results.get("outcomes", []):
         if o.get("exit_code", 0) != 0:
             console.print(f"[yellow]⚠ étape {o.get('step_id')} ({o.get('tool')}) code {o.get('exit_code')}[/yellow]")
+
+
+@app.command()
+def solve(
+    target: str = typer.Option(..., "--target", "-t", help="URL/hôte cible (lab autorisé)."),
+    authorized: bool = typer.Option(
+        False, "--authorized", help="Confirme explicitement l'autorisation de tester la cible."),
+    scope: str = typer.Option(None, "--scope", "-s", help="Fichier d'allowlist (défaut : scope.txt)."),
+    out: str = typer.Option(None, "--out", "-o", help="Dossier de sortie (défaut : runs/<timestamp>)."),
+):
+    """Exécute les solveurs de challenges OWASP Juice Shop contre une cible autorisée."""
+    try:
+        guard = _load_scope(scope)
+    except typer.BadParameter as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1)
+
+    # Même double garde-fou que `run` : flag explicite ET appartenance au scope.
+    if not authorized:
+        console.print(Panel.fit(
+            "[bold red]Refus :[/bold red] ajoute le flag [b]--authorized[/b] pour confirmer "
+            "que tu es autorisé à tester cette cible.", border_style="red"))
+        raise typer.Exit(code=2)
+    if not guard.is_authorized(target):
+        console.print(Panel.fit(
+            f"[bold red]Refus :[/bold red] cible hors périmètre → [b]{target}[/b]\n"
+            f"Hôtes autorisés : {', '.join(guard.allowed)}\n"
+            "Ajoute l'hôte à scope.txt si tu y es autorisé.", border_style="red"))
+        raise typer.Exit(code=3)
+
+    out_dir = out or str(_ROOT / "runs" / datetime.now().strftime("%Y%m%d-%H%M%S"))
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    console.print(Panel.fit(
+        f"[b]Cible[/b] : {target}\n"
+        f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
+        f"[b]Sortie[/b] : {out_dir}", title="Pentaster — Solve", border_style="green"))
+
+    with console.status("[bold green]Exécution des solveurs de challenges…", spinner="dots"):
+        result = run_solvers(target)
+
+    delta = result["after"] - result["before"]
+    console.print(
+        f"\n[b]Résultat[/b] : {result['before']} → {result['after']} / {result['total']} "
+        f"résolus ([green]+{delta}[/green])")
+    if result["newly_solved"]:
+        table = Table(title=f"Nouvellement résolus ({len(result['newly_solved'])})")
+        table.add_column("Challenge")
+        for name in result["newly_solved"]:
+            table.add_row(name)
+        console.print(table)
+    else:
+        console.print("[yellow]Aucun nouveau challenge résolu.[/yellow]")
+
+    out_path = os.path.join(out_dir, "challenges.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(result, fh, indent=2, ensure_ascii=False)
+    console.print(f"\n[green]→[/green] JSON : {out_path}")
 
 
 @app.command()
