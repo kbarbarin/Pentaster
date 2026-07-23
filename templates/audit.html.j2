@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pentaster — audit générique — {{ target }}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: system-ui, "Segoe UI", sans-serif; margin: 2rem; color: #0f172a; background: #f8fafc; }
+    h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #e2e8f0; padding-bottom: .3rem; }
+    .meta { color: #475569; font-size: .9rem; }
+    .meta code { background: #eef2f7; padding: .1rem .35rem; border-radius: .25rem; }
+    .chips { margin: 1rem 0; }
+    .chip, .sev { color: #fff; padding: .18rem .55rem; border-radius: .4rem; font-size: .8rem; margin-right: .35rem; display: inline-block; }
+    table { border-collapse: collapse; width: 100%; background: #fff; margin-top: .5rem; }
+    th, td { border: 1px solid #e2e8f0; padding: .5rem .6rem; text-align: left; font-size: .9rem; vertical-align: top; }
+    th { background: #0f172a; color: #fff; position: sticky; top: 0; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
+    .muted { color: #64748b; }
+    footer { margin-top: 2rem; color: #94a3b8; font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <h1>Rapport Pentaster — Audit générique</h1>
+  <p class="meta">
+    <b>Cible :</b> <code>{{ target }}</code> ·
+    <b>Généré le :</b> {{ generated_at }}
+  </p>
+
+  <div class="chips">
+    {% for sev in ["critical", "high", "medium", "low", "info"] %}
+      {% if counts.get(sev) %}
+        <span class="chip" style="background: {{ sev | sev_color }}">{{ sev | capitalize }}: {{ counts[sev] }}</span>
+      {% endif %}
+    {% endfor %}
+    {% if not findings %}<span class="muted">Aucun finding.</span>{% endif %}
+  </div>
+
+  <h2>Findings ({{ findings | length }})</h2>
+  <table>
+    <thead>
+      <tr><th>Sévérité</th><th>Technique</th><th>URL</th><th>Preuve</th></tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr>
+        <td><span class="sev" style="background: {{ f.severity | sev_color }}">{{ f.severity | capitalize }}</span></td>
+        <td>{{ f.technique }}</td>
+        <td class="mono">{{ f.url }}</td>
+        <td class="mono muted">{{ f.evidence }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">Aucun finding.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <footer>Généré par Pentaster le {{ generated_at }} · Usage sur cibles autorisées uniquement.</footer>
+</body>
+</html>

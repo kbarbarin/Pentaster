@@ -7,17 +7,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import dataclasses
+
 import typer
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .engine import Engine
+from .report import SEVERITY_COLOR
 from .report import save_report
 from .results import save_results
 from .runner import DockerRunner
 from .scope import ScopeError, ScopeGuard
 from .solvers import run_solvers
+from .techniques import run_techniques
 from .workflow import load_workflow
 
 app = typer.Typer(add_completion=False, help="Pentaster — orchestrateur de pentest web.")
@@ -232,6 +237,92 @@ def solve(
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=2, ensure_ascii=False)
     console.print(f"\n[green]→[/green] JSON : {out_path}")
+
+
+def _render_audit_html(result: dict, template_dir: str | None = None) -> str:
+    """Rend le rapport HTML autonome de `pentaster audit` (jinja2, autoescape)."""
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    findings = sorted(result["findings"], key=lambda f: order.get((f.severity or "").lower(), 5))
+    counts: dict[str, int] = {}
+    for f in findings:
+        counts[f.severity.lower()] = counts.get(f.severity.lower(), 0) + 1
+    env = Environment(
+        loader=FileSystemLoader(template_dir or str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(["html", "xml", "j2"]),
+    )
+    env.filters["sev_color"] = lambda s: SEVERITY_COLOR.get((s or "unknown").lower(), "#6b7280")
+    template = env.get_template("audit.html.j2")
+    return template.render(
+        target=result["target"],
+        findings=findings,
+        counts=counts,
+        generated_at=datetime.now().isoformat(timespec="seconds"),
+    )
+
+
+@app.command()
+def audit(
+    target: str = typer.Option(..., "--target", "-t", help="URL/hôte cible (lab autorisé)."),
+    authorized: bool = typer.Option(
+        False, "--authorized", help="Confirme explicitement l'autorisation de tester la cible."),
+    scope: str = typer.Option(None, "--scope", "-s", help="Fichier d'allowlist (défaut : scope.txt)."),
+    out: str = typer.Option(None, "--out", "-o", help="Dossier de sortie (défaut : runs/<timestamp>)."),
+):
+    """Exécute le moteur d'exploitation web générique contre une cible autorisée."""
+    try:
+        guard = _load_scope(scope)
+    except typer.BadParameter as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1)
+
+    # Même double garde-fou que `run`/`solve` : flag explicite ET appartenance au scope.
+    if not authorized:
+        console.print(Panel.fit(
+            "[bold red]Refus :[/bold red] ajoute le flag [b]--authorized[/b] pour confirmer "
+            "que tu es autorisé à tester cette cible.", border_style="red"))
+        raise typer.Exit(code=2)
+    if not guard.is_authorized(target):
+        console.print(Panel.fit(
+            f"[bold red]Refus :[/bold red] cible hors périmètre → [b]{target}[/b]\n"
+            f"Hôtes autorisés : {', '.join(guard.allowed)}\n"
+            "Ajoute l'hôte à scope.txt si tu y es autorisé.", border_style="red"))
+        raise typer.Exit(code=3)
+
+    out_dir = out or str(_ROOT / "runs" / datetime.now().strftime("%Y%m%d-%H%M%S"))
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    console.print(Panel.fit(
+        f"[b]Cible[/b] : {target}\n"
+        f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
+        f"[b]Sortie[/b] : {out_dir}", title="Pentaster — Audit", border_style="green"))
+
+    with console.status("[bold green]Exécution du moteur d'exploitation générique…", spinner="dots"):
+        result = run_techniques(target)
+
+    findings = result["findings"]
+    table = Table(title=f"Findings — {result['target']} ({len(findings)})")
+    table.add_column("Sév"); table.add_column("Technique"); table.add_column("URL", max_width=60)
+    table.add_column("Preuve", max_width=60)
+    for f in findings:
+        style = _SEV_STYLE.get(f.severity.lower(), "white")
+        table.add_row(f"[{style}]{f.severity}[/]", f.technique, f.url, f.evidence)
+    console.print(table)
+
+    json_path = os.path.join(out_dir, "audit.json")
+    serializable = {
+        "target": result["target"],
+        "findings": [dataclasses.asdict(f) for f in findings],
+        "ran": result["ran"],
+    }
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(serializable, fh, indent=2, ensure_ascii=False)
+
+    html_path = os.path.join(out_dir, "audit.html")
+    with open(html_path, "w", encoding="utf-8") as fh:
+        fh.write(_render_audit_html(result))
+
+    console.print(f"\n[green]→[/green] JSON : {json_path}")
+    console.print(f"[green]→[/green] Rapport HTML : {html_path}")
 
 
 @app.command()
