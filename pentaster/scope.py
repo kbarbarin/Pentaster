@@ -22,8 +22,11 @@ class ScopeGuard:
         return cls(lines)
 
     def host_of(self, target: str) -> str | None:
-        parsed = urlparse(target if "://" in target else f"http://{target}")
-        hostname = parsed.hostname
+        try:
+            parsed = urlparse(target if "://" in target else f"http://{target}")
+            hostname = parsed.hostname
+        except ValueError:
+            return None
         # A valid hostname should not be empty or contain spaces
         if hostname and " " not in hostname:
             return hostname

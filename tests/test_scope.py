@@ -1,4 +1,3 @@
-import pytest
 from pentaster.scope import ScopeGuard, ScopeError
 
 def test_localhost_authorized_by_default():
@@ -33,3 +32,9 @@ def test_from_file_reads_entries(tmp_path):
 
 def test_scope_error_is_exception():
     assert issubclass(ScopeError, Exception)
+
+def test_malformed_ipv6_target_refused_not_raised():
+    g = ScopeGuard(["example.com"])
+    # unbalanced IPv6 bracket must degrade to refusal, never raise
+    assert g.host_of("http://[::1") is None
+    assert g.is_authorized("http://[::1") is False
