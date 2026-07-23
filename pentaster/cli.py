@@ -101,7 +101,11 @@ def run(
     templates: str = typer.Option(None, "--templates", help="Dossier des templates de rapport."),
 ):
     """Exécute un workflow contre une cible autorisée, puis produit JSON + rapport HTML."""
-    guard = _load_scope(scope)
+    try:
+        guard = _load_scope(scope)
+    except typer.BadParameter as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1)
 
     # Double garde-fou : flag explicite ET appartenance au scope.
     if not authorized:
@@ -116,7 +120,11 @@ def run(
             "Ajoute l'hôte à scope.txt si tu y es autorisé.", border_style="red"))
         raise typer.Exit(code=3)
 
-    wf_path = _resolve_workflow(workflow)
+    try:
+        wf_path = _resolve_workflow(workflow)
+    except typer.BadParameter as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1)
     wf = load_workflow(str(wf_path))
 
     wl_dir = str(Path(wordlists).resolve()) if wordlists else str(_WORDLISTS_DIR)

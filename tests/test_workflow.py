@@ -52,3 +52,12 @@ def test_execution_order_preserves_declared_order_in_wave():
     waves = execution_order(wf)
     # content déclaré avant vulns → même ordre dans la vague
     assert [s.id for s in waves[1]] == ["content", "vulns"]
+
+def test_duplicate_step_id_rejected():
+    import pytest
+    wf = Workflow(name="w", steps=[
+        Step(id="a", tool="httpx", image="img", args=[], parser="httpx"),
+        Step(id="a", tool="nuclei", image="img", args=[], parser="nuclei"),
+    ])
+    with pytest.raises(ValueError, match="a"):
+        validate_dag(wf)

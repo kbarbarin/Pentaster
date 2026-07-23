@@ -23,9 +23,11 @@ def _iter_json_lines(stdout: str):
         if not line:
             continue
         try:
-            yield json.loads(line)
+            obj = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(obj, dict):
+            yield obj
 
 
 def parse_httpx(stdout: str, target: str) -> list[Finding]:
@@ -56,6 +58,8 @@ def parse_ffuf(stdout: str, target: str) -> list[Finding]:
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
         return []
     findings: list[Finding] = []
     for res in data.get("results", []):

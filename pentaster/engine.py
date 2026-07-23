@@ -51,6 +51,12 @@ class Engine:
         findings = parser(result.stdout, self.runner.rewrite_target(target))
         return StepOutcome(step.id, step.tool, result.exit_code, findings)
 
+    def _safe_run_step(self, step: Step, target: str) -> StepOutcome:
+        try:
+            return self._run_step(step, target)
+        except Exception:
+            return StepOutcome(step_id=step.id, tool=step.tool, exit_code=-1, findings=[])
+
     def execute(self, workflow: Workflow, target: str, now: Callable[[], str] = _now_iso) -> RunReport:
         if not self.scope.is_authorized(target):
             raise ScopeError(f"Cible non autorisée par le scope : {target}")
@@ -58,7 +64,7 @@ class Engine:
         outcomes: list[StepOutcome] = []
         for wave in execution_order(workflow):
             with ThreadPoolExecutor(max_workers=len(wave)) as ex:
-                outcomes.extend(ex.map(lambda s: self._run_step(s, target), wave))
+                outcomes.extend(ex.map(lambda s: self._safe_run_step(s, target), wave))
         finished = now()
         order = [s.id for s in workflow.steps]
         outcomes.sort(key=lambda o: order.index(o.step_id))

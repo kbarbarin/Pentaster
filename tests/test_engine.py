@@ -88,3 +88,21 @@ def test_outcomes_resorted_across_waves_to_declared_order():
     eng = Engine(FR(), ScopeGuard([]))
     report = eng.execute(wf, "http://localhost:3000", now=lambda: "t")
     assert [o.step_id for o in report.outcomes] == ["second", "first"]
+
+def test_step_exception_is_isolated_not_fatal():
+    wf = Workflow(name="w", steps=[
+        Step(id="ok", tool="httpx", image="img", args=[], parser="httpx"),
+        Step(id="boom", tool="nuclei", image="img", args=[], parser="nuclei"),
+    ])
+    class BoomRunner(DockerRunner):
+        def __init__(self):
+            super().__init__("/w", run_docker=lambda a: ("", "", 0))
+        def run(self, step, target):
+            if step.id == "boom":
+                raise RuntimeError("kaboom")
+            return RunResult(step.id, '{"url":"u","status_code":200,"tech":["Angular"]}', "", 0)
+    eng = Engine(BoomRunner(), ScopeGuard([]))
+    report = eng.execute(wf, "http://localhost:3000", now=lambda: "t")
+    assert {o.step_id for o in report.outcomes} == {"ok", "boom"}
+    boom = next(o for o in report.outcomes if o.step_id == "boom")
+    assert boom.exit_code != 0 and boom.findings == []

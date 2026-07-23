@@ -28,6 +28,11 @@ def load_workflow(path: str) -> Workflow:
 
 
 def validate_dag(wf: Workflow) -> None:
+    seen: set[str] = set()
+    for step in wf.steps:
+        if step.id in seen:
+            raise ValueError(f"Id d'étape dupliqué : '{step.id}'")
+        seen.add(step.id)
     ids = {s.id for s in wf.steps}
     for step in wf.steps:
         for dep in step.depends_on:

@@ -52,3 +52,8 @@ def test_get_parser_unknown_raises():
     import pytest
     with pytest.raises(KeyError):
         get_parser("does-not-exist")
+
+def test_parsers_ignore_non_object_json():
+    assert parse_httpx("[1,2,3]\n", "t") == []
+    assert parse_nuclei('"a string"\n', "t") == []
+    assert parse_ffuf("[1,2,3]", "t") == []

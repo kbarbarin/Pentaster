@@ -53,6 +53,11 @@ def test_run_unknown_workflow_is_error():
     assert res.exit_code != 0
 
 
+def test_run_unknown_workflow_exits_with_code_1_not_2():
+    res = runner.invoke(app, ["run", "does-not-exist", "--target", "http://localhost:3000", "--authorized"])
+    assert res.exit_code == 1
+
+
 def test_run_scan_produces_outputs(tmp_path):
     """run_scan orchestre un scan complet sans jamais invoquer Docker (runner factice injecté)."""
 
