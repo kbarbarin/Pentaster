@@ -1,0 +1,23 @@
+name: web-basic
+description: Évaluation web de base (probe → découverte de contenu → vulns)
+target_type: url
+steps:
+  - id: probe
+    tool: httpx
+    image: projectdiscovery/httpx:latest
+    args: ["-u", "{{target}}", "-json", "-tech-detect", "-status-code", "-title"]
+    parser: httpx
+
+  - id: content
+    tool: ffuf
+    image: ghcr.io/ffuf/ffuf:latest
+    depends_on: [probe]
+    args: ["-u", "{{target}}/FUZZ", "-w", "/wordlists/common.txt", "-of", "json", "-o", "/dev/stdout", "-s"]
+    parser: ffuf
+
+  - id: vulns
+    tool: nuclei
+    image: projectdiscovery/nuclei:latest
+    depends_on: [probe]
+    args: ["-u", "{{target}}", "-jsonl", "-severity", "low,medium,high,critical"]
+    parser: nuclei
