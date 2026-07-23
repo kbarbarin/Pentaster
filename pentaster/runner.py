@@ -1,6 +1,7 @@
 """Runner Docker : exécute une étape dans un conteneur éphémère."""
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import Callable
@@ -8,6 +9,9 @@ from typing import Callable
 from .workflow import Step
 
 DockerFn = Callable[[list[str]], tuple[str, str, int]]
+
+# Regex to match localhost or 127.0.0.1 only when bounded by non-host characters
+_LOCAL_HOST_RE = re.compile(r"(?<![\w.-])(localhost|127\.0\.0\.1)(?![\w.-])")
 
 
 @dataclass
@@ -29,9 +33,7 @@ class DockerRunner:
         self._run_docker = run_docker or _default_docker
 
     def rewrite_target(self, target: str) -> str:
-        return target.replace("localhost", "host.docker.internal").replace(
-            "127.0.0.1", "host.docker.internal"
-        )
+        return _LOCAL_HOST_RE.sub("host.docker.internal", target)
 
     def build_command(self, step: Step, target: str) -> list[str]:
         rewritten = self.rewrite_target(target)

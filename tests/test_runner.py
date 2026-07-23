@@ -38,3 +38,16 @@ def test_run_uses_injected_docker_and_returns_result():
     assert res.stdout == "STDOUT"
     assert res.exit_code == 0
     assert calls["argv"][0] == "docker"
+
+
+def test_rewrite_does_not_corrupt_similar_hosts():
+    r = DockerRunner("/w")
+    assert r.rewrite_target("http://127.0.0.100:8080") == "http://127.0.0.100:8080"
+    assert r.rewrite_target("http://notlocalhost.example.com") == "http://notlocalhost.example.com"
+    assert r.rewrite_target("http://mylocalhost.internal") == "http://mylocalhost.internal"
+
+
+def test_rewrite_still_maps_exact_local_hosts():
+    r = DockerRunner("/w")
+    assert r.rewrite_target("http://localhost:3000") == "http://host.docker.internal:3000"
+    assert r.rewrite_target("http://127.0.0.1:3000/x") == "http://host.docker.internal:3000/x"
