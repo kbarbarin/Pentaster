@@ -1,3 +1,4 @@
+import time
 import pytest
 from pentaster.engine import Engine, RunReport, StepOutcome
 from pentaster.runner import DockerRunner, RunResult
@@ -45,3 +46,24 @@ def test_outcomes_ordered_by_declaration():
     eng = Engine(FakeRunner(), ScopeGuard([]))
     report = eng.execute(make_wf(), "http://localhost:3000", now=lambda: "t")
     assert [o.step_id for o in report.outcomes] == ["probe", "vulns"]
+
+def test_outcomes_ordered_despite_out_of_order_completion():
+    # Two INDEPENDENT steps (no depends_on) => one wave, run concurrently.
+    wf = Workflow(name="w", steps=[
+        Step(id="slow", tool="httpx", image="img", args=[], parser="httpx"),
+        Step(id="fast", tool="nuclei", image="img", args=[], parser="nuclei"),
+    ])
+    class DelayRunner(DockerRunner):
+        def __init__(self):
+            super().__init__("/w", run_docker=lambda a: ("", "", 0))
+        def run(self, step, target):
+            if step.id == "slow":
+                time.sleep(0.1)  # first-declared finishes LAST
+            outputs = {
+                "httpx": '{"url":"u","status_code":200,"tech":[]}',
+                "nuclei": '{"template-id":"x","info":{"name":"B","severity":"low"},"matched-at":"u"}',
+            }
+            return RunResult(step.id, outputs[step.tool], "", 0)
+    eng = Engine(DelayRunner(), ScopeGuard([]))
+    report = eng.execute(wf, "http://localhost:3000", now=lambda: "t")
+    assert [o.step_id for o in report.outcomes] == ["slow", "fast"]
