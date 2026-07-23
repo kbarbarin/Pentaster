@@ -12,6 +12,9 @@ from .engine import RunReport
 # Racine du projet -> templates/ par défaut.
 _DEFAULT_TEMPLATE_DIR = str(Path(__file__).resolve().parent.parent / "templates")
 
+# Chemin complet vers le gabarit HTML par défaut (résolu relativement à la racine du package).
+DEFAULT_TEMPLATE = os.path.join(_DEFAULT_TEMPLATE_DIR, "report.html.j2")
+
 # Ordre de tri (le plus grave d'abord) + palette.
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "unknown": 5}
 SEVERITY_COLOR = {

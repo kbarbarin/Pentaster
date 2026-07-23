@@ -1,6 +1,8 @@
+import os
+
 from pentaster.engine import RunReport, StepOutcome
 from pentaster.parsers import Finding
-from pentaster.report import render_report, save_report, _severity_rank
+from pentaster.report import DEFAULT_TEMPLATE, render_report, save_report, _severity_rank
 
 
 def _report():
@@ -15,6 +17,10 @@ def _report():
     ]
     return RunReport("web-basic", "http://localhost:3000",
                      "2026-07-23T10:00:00", "2026-07-23T10:00:12", outcomes)
+
+
+def test_default_template_exists():
+    assert os.path.exists(DEFAULT_TEMPLATE)
 
 
 def test_severity_rank_orders_critical_first():

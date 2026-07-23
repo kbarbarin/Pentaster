@@ -1,8 +1,11 @@
 """Point d'entrée CLI (typer + rich) : `pentaster run <workflow> --target <url>`."""
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import typer
 from rich.console import Console
@@ -53,6 +56,39 @@ def _load_scope(scope_path: str | None) -> ScopeGuard:
     return ScopeGuard([])
 
 
+def _default_engine_factory(wordlists_dir: str, guard: ScopeGuard) -> Engine:
+    return Engine(DockerRunner(wordlists_dir), guard)
+
+
+def run_scan(
+    workflow_path: str,
+    target: str,
+    scope_path: str | None,
+    wordlists_dir: str,
+    out_root: str,
+    now: Callable[[], str] = lambda: datetime.now().isoformat(timespec="seconds"),
+    engine_factory: Callable[[str, ScopeGuard], Engine] = _default_engine_factory,
+    template_dir: str | None = None,
+) -> str:
+    """Orchestration pure d'un scan : charge le workflow, exécute, écrit JSON + HTML.
+
+    Ne touche pas à la console — c'est la commande `run` qui affiche. Le
+    `engine_factory` permet d'injecter un `Engine` (avec un runner factice)
+    dans les tests, sans jamais invoquer Docker.
+
+    `out_root` est le dossier de sortie final (déjà résolu par l'appelant) :
+    la fonction y écrit `results.json` et `report.html` puis renvoie ce chemin.
+    """
+    wf_path = _resolve_workflow(workflow_path)
+    wf = load_workflow(str(wf_path))
+    guard = _load_scope(scope_path)
+    engine = engine_factory(wordlists_dir, guard)
+    report = engine.execute(wf, target, now=now)
+    save_results(report, out_root)
+    save_report(report, out_root, template_dir=template_dir)
+    return out_root
+
+
 @app.command()
 def run(
     workflow: str = typer.Argument(..., help="Nom ('web-basic') ou chemin d'un workflow YAML."),
@@ -78,7 +114,7 @@ def run(
             f"[bold red]Refus :[/bold red] cible hors périmètre → [b]{target}[/b]\n"
             f"Hôtes autorisés : {', '.join(guard.allowed)}\n"
             "Ajoute l'hôte à scope.txt si tu y es autorisé.", border_style="red"))
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=3)
 
     wf_path = _resolve_workflow(workflow)
     wf = load_workflow(str(wf_path))
@@ -93,36 +129,42 @@ def run(
         f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
         f"[b]Sortie[/b] : {out_dir}", title="Pentaster", border_style="green"))
 
-    runner = DockerRunner(wl_dir)
-    engine = Engine(runner, guard)
-
     try:
         with console.status("[bold green]Exécution du workflow (conteneurs Docker)…", spinner="dots"):
-            report = engine.execute(wf, target)
+            out_dir = run_scan(
+                workflow_path=str(wf_path),
+                target=target,
+                scope_path=scope,
+                wordlists_dir=wl_dir,
+                out_root=out_dir,
+                template_dir=tpl_dir,
+            )
     except ScopeError as exc:
         console.print(f"[bold red]{exc}[/bold red]")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=3)
 
-    _print_summary(report)
+    with open(os.path.join(out_dir, "results.json"), encoding="utf-8") as fh:
+        results = json.load(fh)
+    _print_summary(results)
+    console.print(f"\n[green]→[/green] JSON  : {os.path.join(out_dir, 'results.json')}")
+    console.print(f"[green]→[/green] Rapport HTML : {os.path.join(out_dir, 'report.html')}")
 
-    json_path = save_results(report, out_dir)
-    html_path = save_report(report, out_dir, template_dir=tpl_dir)
-    console.print(f"\n[green]→[/green] JSON  : {json_path}")
-    console.print(f"[green]→[/green] Rapport HTML : {html_path}")
 
-
-def _print_summary(report) -> None:
-    table = Table(title=f"Findings — {report.target} ({len(report.findings)})")
+def _print_summary(results: dict) -> None:
+    """Affiche le tableau des findings à partir du `results.json` fraîchement écrit."""
+    findings = [f for o in results.get("outcomes", []) for f in o.get("findings", [])]
+    table = Table(title=f"Findings — {results.get('target')} ({len(findings)})")
     table.add_column("Sév"); table.add_column("Type"); table.add_column("Nom", max_width=50)
     table.add_column("Outil")
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    for f in sorted(report.findings, key=lambda x: order.get(x.severity.lower(), 5)):
-        style = _SEV_STYLE.get(f.severity.lower(), "white")
-        table.add_row(f"[{style}]{f.severity}[/]", f.type, f.name, f.tool)
+    for f in sorted(findings, key=lambda x: order.get((x.get("severity") or "").lower(), 5)):
+        sev = f.get("severity", "")
+        style = _SEV_STYLE.get(sev.lower(), "white")
+        table.add_row(f"[{style}]{sev}[/]", f.get("type", ""), f.get("name", ""), f.get("tool", ""))
     console.print(table)
-    for o in report.outcomes:
-        if o.exit_code != 0:
-            console.print(f"[yellow]⚠ étape {o.step_id} ({o.tool}) code {o.exit_code}[/yellow]")
+    for o in results.get("outcomes", []):
+        if o.get("exit_code", 0) != 0:
+            console.print(f"[yellow]⚠ étape {o.get('step_id')} ({o.get('tool')}) code {o.get('exit_code')}[/yellow]")
 
 
 @app.command()
@@ -137,6 +179,23 @@ def scope_check(
     else:
         console.print(f"[red]✘ REFUSÉE[/red] — {target} (autorisés : {', '.join(guard.allowed)})")
         raise typer.Exit(code=2)
+
+
+@app.command("list-workflows")
+def list_workflows(
+    directory: str = typer.Option(None, "--dir", "-d", help="Dossier des workflows (défaut : workflows/)."),
+):
+    """Liste les workflows YAML disponibles."""
+    d = Path(directory) if directory else _WORKFLOWS_DIR
+    if not d.exists():
+        console.print(f"[red]Dossier introuvable : {d}[/red]")
+        raise typer.Exit(code=1)
+    names = sorted(p.name for p in d.iterdir() if p.suffix in (".yaml", ".yml"))
+    if not names:
+        console.print(f"[yellow]Aucun workflow trouvé dans {d}[/yellow]")
+        return
+    for name in names:
+        console.print(f"• {name}")
 
 
 if __name__ == "__main__":
