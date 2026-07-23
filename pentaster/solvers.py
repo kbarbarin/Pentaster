@@ -639,8 +639,11 @@ SOLVERS: list[tuple[str, Callable[[Session], bool]]] = [
 ]
 
 
-def run_solvers(base_url: str) -> dict:
+def run_solvers(base_url: str, progress: Callable[[str, str, bool], None] | None = None) -> dict:
     """Exécute tous les solveurs contre `base_url` et renvoie un résumé.
+
+    `progress`, si fourni, est appelé `progress("start", label, False)` avant
+    chaque solveur puis `progress("done", label, ok)` après.
 
     {
         "before": int,               # nb résolus avant exécution
@@ -656,11 +659,15 @@ def run_solvers(base_url: str) -> dict:
 
     ran: list[tuple[str, bool]] = []
     for label, fn in SOLVERS:
+        if progress:
+            progress("start", label, False)
         try:
             ok = bool(fn(sess))
         except Exception:  # noqa: BLE001
             ok = False
         ran.append((label, ok))
+        if progress:
+            progress("done", label, ok)
 
     after, _ = challenge_status(base_url)
     n_after = sum(1 for v in after.values() if v)

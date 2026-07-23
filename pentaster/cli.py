@@ -217,8 +217,15 @@ def solve(
         f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
         f"[b]Sortie[/b] : {out_dir}", title="Pentaster — Solve", border_style="green"))
 
-    with console.status("[bold green]Exécution des solveurs de challenges…", spinner="dots"):
-        result = run_solvers(target)
+    console.print("\n[bold cyan]💥 Exploits exécutés[/bold cyan]")
+
+    def _on_solve(event, label, ok):
+        if event == "start":
+            console.print(f"  [cyan]⚙[/cyan]  [dim]exploit :[/dim] {label}…")
+        elif ok:
+            console.print(f"     [green][bold]✓ exploit OK[/bold] ({label})[/green]")
+
+    result = run_solvers(target, progress=_on_solve)
 
     delta = result["after"] - result["before"]
     console.print(
@@ -296,17 +303,37 @@ def audit(
         f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
         f"[b]Sortie[/b] : {out_dir}", title="Pentaster — Audit", border_style="green"))
 
-    with console.status("[bold green]Exécution du moteur d'exploitation générique…", spinner="dots"):
-        result = run_techniques(target)
+    console.print("\n[bold cyan]🔎 Techniques testées[/bold cyan]")
 
+    def _on_tech(event, name, count):
+        if event == "start":
+            console.print(f"  [cyan]⚙[/cyan]  [dim]test :[/dim] {name}…")
+        elif count:
+            console.print(f"     [green on default][bold]✓ {count} vulnérabilité(s)[/bold][/] "
+                          f"[green]({name})[/green]")
+
+    result = run_techniques(target, progress=_on_tech)
     findings = result["findings"]
-    table = Table(title=f"Findings — {result['target']} ({len(findings)})")
-    table.add_column("Sév"); table.add_column("Technique"); table.add_column("URL", max_width=60)
-    table.add_column("Preuve", max_width=60)
+
+    from collections import Counter
+    counts = Counter(f.severity.lower() for f in findings)
+    summary = "   ".join(
+        f"[{_SEV_STYLE.get(s, 'white')}]{counts[s]} {s}[/]"
+        for s in ("critical", "high", "medium", "low", "info") if counts.get(s))
+
+    console.print()
+    table = Table(title=f"Vulnérabilités trouvées — {result['target']} ({len(findings)})",
+                  header_style="bold")
+    table.add_column("Sévérité"); table.add_column("Technique")
+    table.add_column("URL", max_width=55); table.add_column("Preuve", max_width=55)
     for f in findings:
         style = _SEV_STYLE.get(f.severity.lower(), "white")
-        table.add_row(f"[{style}]{f.severity}[/]", f.technique, f.url, f.evidence)
+        table.add_row(f"[{style}]{f.severity.upper()}[/]", f.technique, f.url, f.evidence)
     console.print(table)
+    if summary:
+        console.print(f"[bold]Résumé :[/bold] {summary}")
+    else:
+        console.print("[green]Aucune vulnérabilité confirmée.[/green]")
 
     json_path = os.path.join(out_dir, "audit.json")
     serializable = {

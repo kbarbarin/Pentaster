@@ -373,18 +373,27 @@ TECHNIQUES: list[tuple[str, Callable[[Http], list[Finding]]]] = [
 ]
 
 
-def run_techniques(base_url: str) -> dict:
-    """Exécute toutes les techniques génériques contre `base_url`."""
+def run_techniques(base_url: str, progress: Callable[[str, str, int], None] | None = None) -> dict:
+    """Exécute toutes les techniques génériques contre `base_url`.
+
+    `progress`, si fourni, est appelé `progress("start", name, 0)` avant chaque
+    technique puis `progress("done", name, nb_findings)` après — ce qui permet à
+    l'appelant (CLI) d'afficher une progression sans coupler ce module à `rich`.
+    """
     http = Http(base_url)
     findings: list[Finding] = []
     ran: list[tuple[str, int]] = []
     for name, fn in TECHNIQUES:
+        if progress:
+            progress("start", name, 0)
         try:
             res = fn(http)
         except Exception:  # noqa: BLE001
             res = []
         findings.extend(res)
         ran.append((name, len(res)))
+        if progress:
+            progress("done", name, len(res))
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings.sort(key=lambda f: order.get(f.severity, 5))
     return {"target": base_url, "findings": findings, "ran": ran}
