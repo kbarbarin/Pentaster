@@ -55,8 +55,13 @@ def parse_ffuf(stdout: str, target: str) -> list[Finding]:
     stdout = stdout.strip()
     if not stdout:
         return []
+    # ffuf prints discovered paths to stdout before its JSON report (even with
+    # -s), so isolate the JSON object starting at the first "{".
+    start = stdout.find("{")
+    if start == -1:
+        return []
     try:
-        data = json.loads(stdout)
+        data = json.loads(stdout[start:])
     except json.JSONDecodeError:
         return []
     if not isinstance(data, dict):

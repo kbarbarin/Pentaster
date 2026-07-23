@@ -10,7 +10,7 @@ steps:
 
   - id: content
     tool: ffuf
-    image: ghcr.io/ffuf/ffuf:latest
+    image: secsi/ffuf:latest
     depends_on: [probe]
     args: ["-u", "{{target}}/FUZZ", "-w", "/wordlists/common.txt", "-of", "json", "-o", "/dev/stdout", "-s"]
     parser: ffuf

@@ -33,6 +33,15 @@ def test_parse_ffuf_returns_endpoint_per_result():
 def test_parse_ffuf_handles_empty():
     assert parse_ffuf('{"results":[],"config":{}}', "t") == []
 
+def test_parse_ffuf_extracts_json_after_live_output():
+    # ffuf prints discovered paths before its JSON report; parser must skip them
+    mixed = ('admin\nlogin\n'
+             '{"results":[{"url":"http://h/admin","status":200,"length":10}],"config":{}}')
+    out = parse_ffuf(mixed, "http://h")
+    assert len(out) == 1
+    assert out[0].name == "http://h/admin"
+    assert out[0].type == "endpoint" and out[0].tool == "ffuf"
+
 def test_parse_nuclei_maps_severity_and_name():
     out = parse_nuclei(NUCLEI, "http://host.docker.internal:3000")
     assert len(out) == 2
