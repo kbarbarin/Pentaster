@@ -1,0 +1,8 @@
+# Allowlist Pentaster — une entrée (hôte ou domaine) par ligne.
+# localhost et 127.0.0.1 sont autorisés par défaut (lab local).
+# Ajoute ici UNIQUEMENT des cibles que tu possèdes / héberges ou
+# pour lesquelles tu as une autorisation écrite.
+localhost
+127.0.0.1
+# exemple d'une 2e cible de lab auto-hébergée :
+# juice-shop.local
