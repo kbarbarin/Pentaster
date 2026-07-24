@@ -72,6 +72,32 @@ def test_error_based_sqli_no_signature_is_safe():
     assert t_error_based_sqli(ctx) == []
 
 
+def test_error_based_sqli_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert : le module doit quand même sonder les
+    endpoints/paramètres courants intégrés (repli), et détecter la fuite."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = RoutedHttp().when_get(
+        lambda p, kw: "products/search" in p and "%27" in p,
+        (200, {}, "SQLITE_ERROR: near \"'\": syntax error"))
+    ctx = make_ctx(sitemap, http)
+    findings = t_error_based_sqli(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "sqli"
+
+
+def test_sqli_auth_bypass_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans formulaire découvert : le module doit quand même sonder
+    les endpoints de login courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = (RoutedHttp()
+            .when_post(_has_or_payload, (200, {}, '{"token":"abc123"}'))
+            .when_post(lambda p, kw: True, (401, {}, '{"error":"invalid"}')))
+    ctx = make_ctx(sitemap, http)
+    findings = t_sqli_auth_bypass(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "sqli"
+
+
 def _has_or_payload(path, kw):
     data = kw.get("data") or {}
     return any("OR" in str(v) for v in data.values())
@@ -133,6 +159,19 @@ def test_nosql_auth_bypass_safe_when_rejected():
     assert t_nosql_auth_bypass(ctx) == []
 
 
+def test_nosql_auth_bypass_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans formulaire découvert : le module doit quand même sonder
+    les endpoints de login courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = (RoutedHttp()
+            .when_post(_has_operator_payload, (200, {}, '{"token":"xyz"}'))
+            .when_post(lambda p, kw: True, (401, {}, "invalid")))
+    ctx = make_ctx(sitemap, http)
+    findings = t_nosql_auth_bypass(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "nosql"
+
+
 # --------------------------------------------------------------------- cmdi
 def _decoded(path):
     return up.unquote(path)
@@ -155,6 +194,19 @@ def test_command_injection_safe_without_marker():
     http = RoutedHttp().when_get(lambda p, kw: True, (200, {}, "pong"))
     ctx = make_ctx(sitemap, http)
     assert t_command_injection(ctx) == []
+
+
+def test_command_injection_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert : le module doit quand même sonder les
+    endpoints/paramètres courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = RoutedHttp().when_get(
+        lambda p, kw: any(pl in _decoded(p) for pl in ["; id", "| id", "`id`", "$(id)", "& id"]),
+        (200, {}, "uid=0(root) gid=0(root) groups=0(root)"))
+    ctx = make_ctx(sitemap, http)
+    findings = t_command_injection(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "cmdi"
 
 
 # --------------------------------------------------------------------- SSTI
@@ -204,6 +256,35 @@ def test_ssti_skips_spa_shell():
     assert t_ssti(ctx) == []
 
 
+def test_ssti_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert : le module doit quand même sonder les
+    endpoints/paramètres courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+
+    def handler(path, kw):
+        decoded = _decoded(path)
+        if "{{7*7}}" in decoded or "${7*7}" in decoded or "#{7*7}" in decoded:
+            return (200, {}, "resultat: 49")
+        return (200, {}, "resultat: erreur")
+
+    class HandlerHttp:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path, **kw):
+            self.calls.append(("GET", path, kw))
+            return handler(path, kw)
+
+        def post(self, path, **kw):
+            self.calls.append(("POST", path, kw))
+            return (404, {}, "")
+
+    ctx = make_ctx(sitemap, HandlerHttp())
+    findings = t_ssti(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "ssti"
+
+
 # ---------------------------------------------------------------- traversal
 def test_path_traversal_detects_passwd_leak():
     sitemap = SiteMap(origin=ORIGIN, params={f"{ORIGIN}/download": {"file"}})
@@ -223,6 +304,19 @@ def test_path_traversal_safe_without_signature():
     http = RoutedHttp().when_get(lambda p, kw: True, (404, {}, "not found"))
     ctx = make_ctx(sitemap, http)
     assert t_path_traversal(ctx) == []
+
+
+def test_path_traversal_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert : le module doit quand même sonder les
+    endpoints/paramètres courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = RoutedHttp().when_get(
+        lambda p, kw: "etc/passwd" in _decoded(p) or "etc%2fpasswd" in p.lower(),
+        (200, {}, "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/usr/sbin:/usr/sbin/nologin"))
+    ctx = make_ctx(sitemap, http)
+    findings = t_path_traversal(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "traversal"
 
 
 def test_path_traversal_null_byte_variant_on_endpoint():

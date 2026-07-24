@@ -68,6 +68,16 @@ def test_reflected_xss_safe_when_html_escaped():
     assert t_reflected_xss(ctx) == []
 
 
+def test_reflected_xss_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert (SPA peu explorable) : le module doit
+    quand même sonder les endpoints/paramètres courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    ctx = make_ctx(sitemap, ReflectHttp(escape=False))
+    findings = t_reflected_xss(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "xss"
+
+
 # ----------------------------------------------------------------- stored XSS
 def test_stored_xss_detects_persistent_marker():
     sitemap = SiteMap(

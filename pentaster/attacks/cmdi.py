@@ -5,14 +5,20 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
-from ._util import iter_param_targets, with_query_param
+from ._util import merged_param_targets, with_query_param
 
 CMD_PAYLOADS = ["; id", "| id", "`id`", "$(id)", "& id"]
 CMD_MARKER = re.compile(r"uid=\d+\(.*gid=\d+\(")
 
+# Repli intégré : endpoints/paramètres courants toujours sondés, même sans
+# rien découvert par le crawl (SPA peu explorable).
+COMMON_ENDPOINTS = ["/rest/products/search", "/search", "/api/ping", "/ping"]
+COMMON_PARAMS = ["q"]
+
 
 def t_command_injection(ctx) -> list[Finding]:
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS, COMMON_PARAMS)
+    for base_url, param in targets:
         for inj in CMD_PAYLOADS:
             target = with_query_param(base_url, param, "x" + inj)
             st, _, body = ctx.safe_get(target)

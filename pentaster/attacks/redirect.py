@@ -3,15 +3,22 @@ dont le nom évoque une destination de redirection."""
 from __future__ import annotations
 
 from ..scan_models import Finding
-from ._util import iter_param_targets, with_query_param
+from ._util import merged_param_targets, with_query_param
 
 REDIRECT_PARAM_HINTS = ("redirect", "url", "to", "next", "returnurl", "dest",
                         "return", "continue")
 EVIL = "https://evil.attacker.example"
 
+# Repli intégré : endpoints courants toujours sondés (avec les noms de
+# paramètres de redirection habituels), même sans rien découvert par le
+# crawl (SPA peu explorable).
+COMMON_ENDPOINTS = ["/", "/login", "/logout", "/redirect"]
+
 
 def t_open_redirect(ctx) -> list[Finding]:
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS,
+                                   REDIRECT_PARAM_HINTS)
+    for base_url, param in targets:
         if param.lower() not in REDIRECT_PARAM_HINTS:
             continue
         target = with_query_param(base_url, param, EVIL)

@@ -5,13 +5,19 @@ from __future__ import annotations
 
 from ..scan_models import Finding
 from .base import is_spa_shell
-from ._util import iter_param_targets, with_query_param
+from ._util import merged_param_targets, with_query_param
 
 SSTI_PROBES = [("{{7*7}}", "49"), ("${7*7}", "49"), ("#{7*7}", "49")]
 
+# Repli intégré : endpoints/paramètres courants toujours sondés, même sans
+# rien découvert par le crawl (SPA peu explorable).
+COMMON_ENDPOINTS = ["/rest/products/search", "/search", "/api/search", "/"]
+COMMON_PARAMS = ["q"]
+
 
 def t_ssti(ctx) -> list[Finding]:
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS, COMMON_PARAMS)
+    for base_url, param in targets:
         for expr, expect in SSTI_PROBES:
             target = with_query_param(base_url, param, expr)
             st, _, body = ctx.safe_get(target)

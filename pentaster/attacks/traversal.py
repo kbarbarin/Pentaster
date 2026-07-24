@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
-from ._util import iter_param_targets, with_query_param
+from ._util import merged_param_targets, with_query_param
 
 TRAVERSAL_PAYLOADS = [
     "../../../../../../etc/passwd",
@@ -15,9 +15,15 @@ TRAVERSAL_PAYLOADS = [
 ]
 PASSWD_RE = re.compile(r"root:.*:0:0:")
 
+# Repli intégré : endpoints/paramètres de type "fichier" courants toujours
+# sondés, même sans rien découvert par le crawl (SPA peu explorable).
+COMMON_ENDPOINTS = ["/download", "/file", "/static", "/assets", "/ftp"]
+COMMON_PARAMS = ["file", "path", "filename", "document", "page"]
+
 
 def t_path_traversal(ctx) -> list[Finding]:
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS, COMMON_PARAMS)
+    for base_url, param in targets:
         for pl in TRAVERSAL_PAYLOADS:
             target = with_query_param(base_url, param, pl)
             st, _, body = ctx.safe_get(target)

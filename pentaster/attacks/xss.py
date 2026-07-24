@@ -7,7 +7,12 @@ from __future__ import annotations
 import secrets
 
 from ..scan_models import Finding
-from ._util import ci_header, iter_param_targets, with_query_param
+from ._util import ci_header, merged_param_targets, with_query_param
+
+# Repli intégré : endpoints/paramètres courants toujours sondés, même sans
+# rien découvert par le crawl (SPA peu explorable).
+COMMON_ENDPOINTS = ["/", "/search", "/rest/products/search", "/api/search"]
+COMMON_PARAMS = ["q", "search", "query", "name", "redirect"]
 
 
 def _fresh_payload() -> tuple[str, str]:
@@ -17,7 +22,8 @@ def _fresh_payload() -> tuple[str, str]:
 
 def t_reflected_xss(ctx) -> list[Finding]:
     _marker, payload = _fresh_payload()
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS, COMMON_PARAMS)
+    for base_url, param in targets:
         target = with_query_param(base_url, param, payload)
         st, headers, body = ctx.safe_get(target)
         ct = ci_header(headers, "content-type").lower()

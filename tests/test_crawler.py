@@ -201,6 +201,71 @@ def test_crawl_skips_network_error_status_minus_one():
     assert isinstance(sitemap.endpoints, list)
 
 
+def test_crawl_discovers_api_endpoints_from_js_bundle():
+    script = {
+        f"{ORIGIN}/": (200, HTML_HEADERS,
+                       '<html><body><script src="/main.js"></script></body></html>'),
+        f"{ORIGIN}/main.js": (200, {"content-type": "application/javascript"},
+                              'const routes=["/api/Users","/rest/user/login",'
+                              '"/assets/logo.png"];fetch("/api/Users");'),
+    }
+    http = FakeHttp(script)
+    guard = ScopeGuard(["localhost"])
+
+    sitemap = run_crawl(ORIGIN, http=http, guard=guard)
+
+    api_urls = {e.url for e in sitemap.api_endpoints}
+    assert any(u.endswith("/api/Users") for u in api_urls)
+    assert any(u.endswith("/rest/user/login") for u in api_urls)
+    # asset-like path should not be treated as an API endpoint
+    assert not any("logo.png" in u for u in api_urls)
+
+
+def test_crawl_js_bundle_fetch_is_bounded():
+    scripts_html = "".join(f'<script src="/bundle{i}.js"></script>' for i in range(20))
+    script = {f"{ORIGIN}/": (200, HTML_HEADERS, f"<html><body>{scripts_html}</body></html>")}
+    for i in range(20):
+        script[f"{ORIGIN}/bundle{i}.js"] = (
+            200, {"content-type": "application/javascript"}, f'"/api/thing{i}"')
+    http = FakeHttp(script)
+    guard = ScopeGuard(["localhost"])
+
+    run_crawl(ORIGIN, http=http, guard=guard)
+
+    js_calls = [p for _, p, _ in http.calls if p.endswith(".js")]
+    assert len(js_calls) <= 10
+
+
+def test_crawl_seeds_common_endpoints_even_on_trivial_crawl():
+    script = {f"{ORIGIN}/": (200, HTML_HEADERS, "<html><body>nothing here</body></html>")}
+    http = FakeHttp(script)
+    guard = ScopeGuard(["localhost"])
+
+    sitemap = run_crawl(ORIGIN, http=http, guard=guard)
+
+    api_urls = {e.url for e in sitemap.api_endpoints}
+    assert any(u.endswith("/rest/user/login") for u in api_urls)
+    assert any(u.endswith("/api/Users") for u in api_urls)
+    seed_sources = {e.source for e in sitemap.api_endpoints if e.url.endswith("/rest/user/login")}
+    assert "seed" in seed_sources
+
+
+def test_crawl_seed_endpoints_respect_scope_guard():
+    class RejectAllGuard:
+        def is_authorized(self, url):
+            return False
+
+        def host_of(self, url):
+            return None
+
+    http = FakeHttp(make_script())
+    guard = RejectAllGuard()
+
+    sitemap = run_crawl(ORIGIN, http=http, guard=guard)
+
+    assert sitemap.api_endpoints == []
+
+
 def test_crawl_does_not_follow_links_from_json_endpoints():
     script = {
         f"{ORIGIN}/": (200, HTML_HEADERS, '<html><body><a href="/data.json">data</a></body></html>'),

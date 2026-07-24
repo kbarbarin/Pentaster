@@ -79,3 +79,51 @@ def ci_header(headers: dict, name: str, default: str = "") -> str:
         if k.lower() == name:
             return v
     return default
+
+
+# --------------------------------------------------------------------------
+# Fusion « découvert (SiteMap) + repli intégré (constantes en dur) ».
+#
+# Certains modules n'avaient de cibles QUE si le crawl avait trouvé quelque
+# chose (SiteMap vide -> aucun test). Ces helpers fusionnent les cibles
+# découvertes avec une base de repli générique (endpoints/paramètres REST
+# courants), dédupliquée, pour que chaque module teste toujours au moins la
+# surface standard — même contre une SPA que le crawler n'a pas su explorer.
+# --------------------------------------------------------------------------
+
+def merged_param_targets(sitemap, origin, common_endpoints=(), common_params=()):
+    """(url_sans_query, param) découverts au crawl + repli intégré, dédupliqués."""
+    seen = set()
+    out = []
+    for base_url, param in iter_param_targets(sitemap):
+        key = (base_url, param)
+        if key not in seen:
+            seen.add(key)
+            out.append((base_url, param))
+    base = origin.rstrip("/")
+    for ep in common_endpoints:
+        base_url = base + ep
+        for param in common_params:
+            key = (base_url, param)
+            if key not in seen:
+                seen.add(key)
+                out.append((base_url, param))
+    return out
+
+
+def merged_login_targets(sitemap, origin, common_endpoints=(),
+                         common_fields=("email", "username")):
+    """(url_post, noms_de_champs) découverts au crawl + repli intégré, dédupliqués."""
+    seen = set()
+    out = []
+    for action, fields in iter_login_targets(sitemap):
+        if action not in seen:
+            seen.add(action)
+            out.append((action, fields))
+    base = origin.rstrip("/")
+    for ep in common_endpoints:
+        url = base + ep
+        if url not in seen:
+            seen.add(url)
+            out.append((url, list(common_fields)))
+    return out

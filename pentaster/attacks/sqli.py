@@ -8,17 +8,27 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
-from ._util import iter_login_targets, iter_param_targets, with_query_param
+from ._util import merged_login_targets, merged_param_targets, with_query_param
 
 SQLI_PAYLOADS = ["' OR '1'='1'--", "' OR true--", "admin'--", "') OR ('1'='1"]
 SQL_ERROR_RE = re.compile(
     r"SQLITE_ERROR|SQL syntax|ORA-\d|psql:|MySQL|unterminated quoted|"
     r"SequelizeDatabaseError|SQLITE", re.I)
 
+# Repli intégré (issu de `techniques.py`, éprouvé sur `pentaster audit`) : les
+# endpoints de login courants sont toujours sondés, même sans formulaire
+# découvert par le crawl (SPA peu explorable).
+LOGIN_ENDPOINTS = ["/rest/user/login", "/api/login", "/api/auth/login",
+                   "/login", "/api/users/login", "/auth/login", "/session"]
+COMMON_SEARCH_ENDPOINTS = ["/rest/products/search", "/api/products", "/search",
+                           "/products", "/api/search"]
+COMMON_PARAMS = ["q", "search", "id", "email", "name"]
+
 
 def t_sqli_auth_bypass(ctx) -> list[Finding]:
     out: list[Finding] = []
-    for action, field_names in iter_login_targets(ctx.sitemap):
+    targets = merged_login_targets(ctx.sitemap, ctx.origin, LOGIN_ENDPOINTS)
+    for action, field_names in targets:
         base_st, _, _ = ctx.safe_post(action, data={"email": "nobody@nope.tld",
                                                       "password": "definitely-wrong-xyz"})
         if base_st in (-1, 404):
@@ -39,7 +49,9 @@ def t_sqli_auth_bypass(ctx) -> list[Finding]:
 
 def t_error_based_sqli(ctx) -> list[Finding]:
     out: list[Finding] = []
-    for base_url, param in iter_param_targets(ctx.sitemap):
+    targets = merged_param_targets(ctx.sitemap, ctx.origin,
+                                   COMMON_SEARCH_ENDPOINTS, COMMON_PARAMS)
+    for base_url, param in targets:
         target = with_query_param(base_url, param, "'")
         st, _, body = ctx.safe_get(target)
         if st in (-1, 404):

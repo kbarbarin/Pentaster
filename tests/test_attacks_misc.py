@@ -2,7 +2,9 @@
 redirect — un cas vulnérable et un cas sûr par module, plus un garde-fou de
 scope. Aucune requête réseau réelle."""
 from pentaster.attacks.access_control import t_idor
-from pentaster.attacks.auth_broken import t_default_credentials, t_jwt_none_alg
+from pentaster.attacks.auth_broken import (
+    t_default_credentials, t_jwt_none_alg, t_mass_assignment,
+)
 from pentaster.attacks.base import AttackContext
 from pentaster.attacks.data_exposure import t_null_byte_backup_exposure, t_sensitive_files
 from pentaster.attacks.misconfig import t_cors_misconfig, t_security_headers, t_verbose_errors
@@ -112,6 +114,21 @@ def test_default_credentials_safe_when_all_rejected():
     assert t_default_credentials(ctx) == []
 
 
+def test_default_credentials_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans formulaire découvert : le module doit quand même sonder
+    les endpoints de login courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = (RoutedHttp()
+            .when_post(lambda p, kw: (kw.get("data") or {}).get("email") == "admin"
+                      and (kw.get("data") or {}).get("password") == "admin",
+                      (200, {}, '{"token":"abc"}'))
+            .when_post(lambda p, kw: True, (401, {}, "invalid")))
+    ctx = make_ctx(sitemap, http)
+    findings = t_default_credentials(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "auth"
+
+
 def test_jwt_none_alg_accepted_by_protected_endpoint():
     sitemap = SiteMap(origin=ORIGIN, endpoints=[
         Endpoint(url=f"{ORIGIN}/api/me", method="GET"),
@@ -134,6 +151,39 @@ def test_jwt_none_alg_safe_when_rejected():
     http = RoutedHttp().when_get(lambda p, kw: True, (401, {}, "unauthorized"))
     ctx = make_ctx(sitemap, http)
     assert t_jwt_none_alg(ctx) == []
+
+
+def test_jwt_none_alg_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans endpoint protégé découvert : le module doit quand même
+    sonder les endpoints protégés courants intégrés (repli)."""
+    sitemap = SiteMap(origin=ORIGIN)
+    http = (RoutedHttp()
+            .when_get(lambda p, kw: "Bearer" in str((kw.get("headers") or {}).get("Authorization", "")),
+                     (200, {}, '{"email":"pentaster@none.tld"}'))
+            .when_get(lambda p, kw: True, (401, {}, "unauthorized")))
+    ctx = make_ctx(sitemap, http)
+    findings = t_jwt_none_alg(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "auth"
+
+
+def test_mass_assignment_detects_privilege_escalation():
+    http = RoutedHttp().when_post(
+        lambda p, kw: (kw.get("data") or {}).get("role") == "admin",
+        (201, {}, '{"user":{"email":"x@y.tld","role":"admin"}}'))
+    ctx = make_ctx(SiteMap(origin=ORIGIN), http)
+    findings = t_mass_assignment(ctx)
+    assert len(findings) == 1
+    assert findings[0].category in ("auth", "access-control")
+    assert findings[0].severity == "high"
+    assert findings[0].technique == "mass-assignment-privilege-escalation"
+
+
+def test_mass_assignment_safe_when_privileged_field_ignored():
+    http = RoutedHttp().when_post(lambda p, kw: True,
+                                  (201, {}, '{"user":{"email":"x@y.tld","role":"customer"}}'))
+    ctx = make_ctx(SiteMap(origin=ORIGIN), http)
+    assert t_mass_assignment(ctx) == []
 
 
 # ------------------------------------------------------------- data exposure
@@ -247,9 +297,25 @@ def test_open_redirect_safe_when_location_internal():
     assert t_open_redirect(ctx) == []
 
 
+def test_open_redirect_builtin_fallback_when_sitemap_empty():
+    """SiteMap sans param découvert : le module doit quand même sonder les
+    endpoints/paramètres courants intégrés (repli)."""
+    evil = "https://evil.attacker.example"
+    sitemap = SiteMap(origin=ORIGIN)
+    http = RoutedHttp().when_get(lambda p, kw: "redirect=" in p,
+                                 (302, {"Location": evil + "/"}, ""))
+    ctx = make_ctx(sitemap, http)
+    findings = t_open_redirect(ctx)
+    assert len(findings) == 1
+    assert findings[0].category == "redirect"
+
+
 def test_open_redirect_ignores_unrelated_param_names():
+    # `q` n'est pas un nom de paramètre de redirection : le module ne doit
+    # jamais l'essayer (que ce soit via la SiteMap ou le repli intégré, qui
+    # lui n'utilise que des noms évoquant une redirection).
     sitemap = SiteMap(origin=ORIGIN, params={f"{ORIGIN}/search": {"q"}})
-    http = RoutedHttp().when_get(lambda p, kw: True,
+    http = RoutedHttp().when_get(lambda p, kw: "q=" in p,
                                  (302, {"Location": "https://evil.attacker.example/"}, ""))
     ctx = make_ctx(sitemap, http)
     assert t_open_redirect(ctx) == []

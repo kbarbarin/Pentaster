@@ -6,7 +6,7 @@ le crawl (formulaires + endpoints POST qui évoquent l'authentification).
 from __future__ import annotations
 
 from ..scan_models import Finding
-from ._util import iter_login_targets
+from ._util import merged_login_targets
 
 NOSQL_PAYLOADS = [
     {"email": {"$ne": None}, "password": {"$ne": None}},
@@ -14,9 +14,15 @@ NOSQL_PAYLOADS = [
     {"username": {"$ne": None}, "password": {"$ne": None}},
 ]
 
+# Repli intégré : endpoints de login courants, toujours sondés même sans
+# formulaire découvert par le crawl (SPA peu explorable).
+LOGIN_ENDPOINTS = ["/rest/user/login", "/api/login", "/api/auth/login",
+                   "/login", "/api/users/login", "/auth/login", "/session"]
+
 
 def t_nosql_auth_bypass(ctx) -> list[Finding]:
-    for action, _fields in iter_login_targets(ctx.sitemap):
+    targets = merged_login_targets(ctx.sitemap, ctx.origin, LOGIN_ENDPOINTS)
+    for action, _fields in targets:
         ref, _, _ = ctx.safe_post(action, data={"email": "nobody@nope.tld", "password": "x"})
         if ref in (-1, 404):
             continue

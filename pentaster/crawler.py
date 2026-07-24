@@ -22,6 +22,54 @@ Progress = Callable[[str, str, object], None]
 
 API_FRAGMENT_RE = re.compile(r"(?:\"|'|\s|^)(/(?:api|rest)/[A-Za-z0-9_\-/.]+)")
 
+# Fragments d'endpoints dans un bundle JS : `/api/...` ou `/rest/...` entre
+# guillemets (routes/appels fetch), ou tout chemin absolu quoté générique
+# qui « ressemble » à un endpoint (filtré ensuite par `_looks_like_endpoint`).
+JS_API_FRAGMENT_RE = re.compile(r"[\"'](/(?:api|rest)/[A-Za-z0-9_\-/.]+)[\"']")
+JS_GENERIC_PATH_RE = re.compile(r"[\"'](/[A-Za-z][A-Za-z0-9_\-/]{1,60})[\"']")
+ASSET_EXT_RE = re.compile(
+    r"\.(?:js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map|html?|json)$", re.I)
+
+MAX_JS_FILES = 10
+MAX_JS_BODY_CHARS = 5_000_000
+
+# Endpoints REST/API courants ajoutés systématiquement à la SiteMap (source
+# "seed"), pour donner une base de test aux modules d'attaque même quand le
+# crawl HTML/JS reste maigre (SPA peu explorable). Conventions génériques +
+# quelques chemins fréquents (ex. OWASP Juice Shop) à titre d'exemples usuels.
+COMMON_ENDPOINTS = [
+    "/api/Users", "/api/Products", "/api/Feedbacks", "/api/Addresses",
+    "/api/BasketItems", "/api/login", "/api/register", "/api/me",
+    "/api/profile", "/api/products", "/api/users", "/api/search",
+    "/rest/user/login", "/rest/user/whoami", "/rest/user/register",
+    "/rest/products/search", "/rest/basket", "/rest/basket/1",
+]
+
+
+def _looks_like_endpoint(path: str) -> bool:
+    if not (2 <= len(path) <= 60):
+        return False
+    if ASSET_EXT_RE.search(path):
+        return False
+    if path.count("/") > 5:
+        return False
+    if any(c in path for c in (" ", "\\", "{", "}", "<", ">")):
+        return False
+    return True
+
+
+def _extract_js_endpoint_paths(body: str) -> set[str]:
+    """Extrait les fragments `/api/...`/`/rest/...` et chemins quotés
+    génériques ressemblant à des endpoints, depuis un corps de bundle JS."""
+    paths: set[str] = set()
+    for m in JS_API_FRAGMENT_RE.finditer(body):
+        paths.add(m.group(1))
+    for m in JS_GENERIC_PATH_RE.finditer(body):
+        candidate = m.group(1)
+        if _looks_like_endpoint(candidate):
+            paths.add(candidate)
+    return paths
+
 
 class LinkFormParser(HTMLParser):
     """Extrait les liens `<a href>` et les formulaires `<form>` d'une page HTML."""
@@ -31,11 +79,14 @@ class LinkFormParser(HTMLParser):
         self.links: list[str] = []
         self._form: Optional[dict] = None
         self.forms: list[dict] = []
+        self.scripts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         adict = dict(attrs)
         if tag == "a" and adict.get("href"):
             self.links.append(adict["href"])
+        elif tag == "script" and adict.get("src"):
+            self.scripts.append(adict["src"])
         elif tag == "form":
             self._form = {
                 "action": adict.get("action", ""),
@@ -87,7 +138,20 @@ def run_crawl(origin: str, *, http, guard, session=None, max_pages: int = 100,
     start_urls = [_normalize(origin)] + list(seeds or [])
     queue = deque((u, 0) for u in start_urls)
     seen_keys: set[tuple[str, tuple[str, ...]]] = set()
+    seen_api_urls: set[str] = set()
     fetched = 0
+    js_fetched = 0
+
+    def _add_api_endpoint(api_url: str, source: str) -> None:
+        if urlparse(api_url).netloc != origin_netloc or not guard.is_authorized(api_url):
+            return
+        if api_url in seen_api_urls:
+            return
+        seen_api_urls.add(api_url)
+        api_ep = Endpoint(url=api_url, method="GET", source=source)
+        sitemap.api_endpoints.append(api_ep)
+        if progress:
+            progress("crawl", "endpoint", api_ep)
 
     while queue and fetched < max_pages:
         url, depth = queue.popleft()
@@ -125,12 +189,7 @@ def run_crawl(origin: str, *, http, guard, session=None, max_pages: int = 100,
 
         # Fragments /api/.../rest/... repérés dans le corps (même hors HTML).
         for m in API_FRAGMENT_RE.finditer(body or ""):
-            api_path = m.group(1)
-            api_url = urljoin(url, api_path)
-            if urlparse(api_url).netloc != origin_netloc or not guard.is_authorized(api_url):
-                continue
-            api_ep = Endpoint(url=api_url, method="GET", source="api")
-            sitemap.api_endpoints.append(api_ep)
+            _add_api_endpoint(urljoin(url, m.group(1)), "api")
 
         if not _is_html(headers):
             continue  # ne pas suivre les liens depuis du contenu non-HTML
@@ -151,6 +210,31 @@ def run_crawl(origin: str, *, http, guard, session=None, max_pages: int = 100,
             if progress:
                 progress("crawl", "form", form)
 
+        # Bundles JS liés (<script src>) : on les récupère (bornés) et on en
+        # extrait les fragments d'endpoints /api/.../rest/... (SPA : les
+        # routes vivent souvent uniquement dans le JS, pas dans le HTML).
+        for src in parser.scripts:
+            if js_fetched >= MAX_JS_FILES:
+                break
+            script_url = urljoin(url, src)
+            if urlparse(script_url).netloc != origin_netloc:
+                continue
+            if not guard.is_authorized(script_url):
+                continue
+            js_fetched += 1
+            try:
+                jst, _jheaders, jbody = (
+                    http.get(script_url, headers=extra_headers) if extra_headers
+                    else http.get(script_url))
+            except Exception:  # noqa: BLE001
+                continue
+            if jst != 200 or not jbody:
+                continue
+            if len(jbody) > MAX_JS_BODY_CHARS:
+                jbody = jbody[:MAX_JS_BODY_CHARS]
+            for path in _extract_js_endpoint_paths(jbody):
+                _add_api_endpoint(urljoin(origin, path), "api")
+
         if depth >= max_depth:
             continue
 
@@ -163,5 +247,11 @@ def run_crawl(origin: str, *, http, guard, session=None, max_pages: int = 100,
             if _dedupe_key(next_url) in seen_keys:
                 continue
             queue.append((next_url, depth + 1))
+
+    # Base de repli : endpoints REST/API courants, ajoutés systématiquement
+    # (source="seed") pour que les modules d'attaque aient toujours une
+    # surface à tester même quand le crawl HTML/JS reste maigre (SPA).
+    for path in COMMON_ENDPOINTS:
+        _add_api_endpoint(urljoin(origin, path), "seed")
 
     return sitemap
