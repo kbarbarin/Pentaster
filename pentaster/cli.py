@@ -406,6 +406,8 @@ def scan(
         "auth": "🔐 Authentification",
         "crawl": "🕸  Cartographie (crawl)",
         "attack": "🔎 Attaques par catégorie",
+        "nuclei": "☢  Nuclei (templates de vulnérabilités)",
+        "exploit": "💥 Exploitation profonde (vulns réelles du site)",
     }
 
     def _header(phase: str) -> None:
@@ -444,6 +446,17 @@ def scan(
                 name, count = payload
                 if count:
                     console.print(f"     [green]✓ {count} vuln ({name})[/green]")
+        elif phase == "nuclei":
+            if event == "finding":
+                f = payload
+                style = _SEV_STYLE.get(getattr(f, "severity", "info"), "white")
+                console.print(f"  [{style}]☢ {getattr(f, 'technique', '')}[/] "
+                              f"[dim]{_trunc(getattr(f, 'url', ''))}[/dim]")
+        elif phase == "exploit":
+            if event == "solved":
+                console.print(f"  [green]💥 exploit confirmé[/green] [bold]{payload}[/bold]")
+            elif event == "skipped":
+                console.print("  [dim]cible non compatible (pas d'API de challenges) — phase ignorée[/dim]")
 
     try:
         with console.status("[bold green]Exécution du pipeline de scan…", spinner="dots"):
