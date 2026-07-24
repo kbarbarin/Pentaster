@@ -4,85 +4,319 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pentaster — rapport {{ report.workflow }} — {{ report.target }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { color-scheme: light; }
-    body { font-family: system-ui, "Segoe UI", sans-serif; margin: 2rem; color: #0f172a; background: #f8fafc; }
-    h1 { font-size: 1.5rem; margin-bottom: .25rem; }
-    h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #e2e8f0; padding-bottom: .3rem; }
-    .meta { color: #475569; font-size: .9rem; }
-    .meta code { background: #eef2f7; padding: .1rem .35rem; border-radius: .25rem; }
-    .chips { margin: 1rem 0; }
-    .chip, .sev { color: #fff; padding: .18rem .55rem; border-radius: .4rem; font-size: .8rem; margin-right: .35rem; display: inline-block; }
-    table { border-collapse: collapse; width: 100%; background: #fff; margin-top: .5rem; }
-    th, td { border: 1px solid #e2e8f0; padding: .5rem .6rem; text-align: left; font-size: .9rem; vertical-align: top; }
-    th { background: #0f172a; color: #fff; position: sticky; top: 0; }
-    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
-    .muted { color: #64748b; }
-    .tech { display: inline-block; background: #e0e7ff; color: #3730a3; border-radius: .35rem; padding: .12rem .5rem; margin: .12rem; font-size: .8rem; }
-    footer { margin-top: 2rem; color: #94a3b8; font-size: .8rem; }
+    :root { 
+      color-scheme: light;
+      --bg-body: #f8fafc;
+      --bg-surface: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border-color: #e2e8f0;
+      --primary: #3b82f6;
+      --border-radius-lg: 12px;
+      --border-radius-md: 8px;
+      --border-radius-sm: 6px;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    }
+    body { 
+      font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+      margin: 0; 
+      padding: 3rem 2rem;
+      color: var(--text-main); 
+      background: var(--bg-body); 
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .header {
+      background: var(--bg-surface);
+      padding: 2.5rem;
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow-md);
+      margin-bottom: 2rem;
+    }
+    h1 { 
+      font-size: 2.25rem; 
+      font-weight: 700;
+      margin: 0 0 .5rem 0; 
+      color: var(--text-main);
+      letter-spacing: -0.025em;
+    }
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 2.5rem 0 1rem 0.5rem;
+    }
+    h2 { 
+      font-size: 1.25rem; 
+      font-weight: 600;
+      margin: 0; 
+      color: var(--text-main);
+    }
+    .meta { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.5rem; }
+    .meta code { 
+      background: var(--bg-body); 
+      padding: 0.2rem 0.5rem; 
+      border-radius: var(--border-radius-sm); 
+      color: var(--primary);
+      font-weight: 600;
+      border: 1px solid var(--border-color);
+    }
+    .filters-bar {
+      margin-top: 1.5rem;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      padding: 0.55rem 1rem;
+      border-radius: 9999px;
+      border: 1px solid var(--border-color);
+      font-family: inherit;
+      font-size: 0.875rem;
+      outline: none;
+      min-width: 280px;
+      background: var(--bg-body);
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+    .chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .chip { 
+      color: #fff; 
+      padding: 0.4rem 1rem; 
+      border-radius: 9999px; 
+      font-size: 0.85rem; 
+      font-weight: 600;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      border: none;
+      cursor: pointer;
+      opacity: 0.7;
+    }
+    .chip:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+    .chip.active {
+      opacity: 1;
+      transform: scale(1.05);
+      box-shadow: var(--shadow-md);
+      outline: 2px solid var(--text-main);
+    }
+    .tech-container {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      background: var(--bg-surface);
+      padding: 1.25rem 1.5rem;
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow-md);
+    }
+    .tech { 
+      display: inline-block; 
+      background: #eff6ff; 
+      color: #1d4ed8; 
+      border: 1px solid #bfdbfe;
+      border-radius: 9999px; 
+      padding: 0.3rem 0.85rem; 
+      font-size: 0.85rem; 
+      font-weight: 600;
+    }
+    .table-container {
+      background: var(--bg-surface);
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+    table { border-collapse: collapse; width: 100%; text-align: left; }
+    th, td { 
+      padding: 1.25rem 1.5rem; 
+      border-bottom: 1px solid var(--border-color); 
+      vertical-align: middle; 
+    }
+    th { 
+      background: #f1f5f9; 
+      color: var(--text-main); 
+      font-weight: 600;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    tbody tr {
+      transition: background-color 0.15s ease;
+    }
+    tbody tr:hover {
+      background-color: #f8fafc;
+    }
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    tr.hidden-row {
+      display: none !important;
+    }
+    .sev { 
+      color: #fff; 
+      padding: 0.35rem 0.85rem; 
+      border-radius: 9999px; 
+      font-size: 0.75rem; 
+      font-weight: 700;
+      text-transform: uppercase;
+      display: inline-block;
+      box-shadow: var(--shadow-sm);
+    }
+    code, .mono { 
+      font-family: 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; 
+      font-size: 0.875rem; 
+    }
+    .muted { color: var(--text-muted); }
+    footer { 
+      margin-top: 4rem; 
+      text-align: center;
+      color: var(--text-muted); 
+      font-size: 0.875rem; 
+    }
   </style>
 </head>
 <body>
-  <h1>Rapport Pentaster</h1>
-  <p class="meta">
-    <b>Cible :</b> <code>{{ report.target }}</code> ·
-    <b>Workflow :</b> {{ report.workflow }} ·
-    <b>Début :</b> {{ report.started_at }} ·
-    <b>Fin :</b> {{ report.finished_at }} ·
-    <b>Durée :</b> {{ duration }}
-  </p>
+  <div class="container">
+    <div class="header">
+      <h1>Rapport Pentaster — Workflow {{ report.workflow }}</h1>
+      <p class="meta">
+        <b>Cible :</b> <code>{{ report.target }}</code> &nbsp;·&nbsp;
+        <b>Workflow :</b> {{ report.workflow }} &nbsp;·&nbsp;
+        <b>Début :</b> {{ report.started_at }} &nbsp;·&nbsp;
+        <b>Fin :</b> {{ report.finished_at }} &nbsp;·&nbsp;
+        <b>Durée :</b> {{ duration }}
+      </p>
 
-  <div class="chips">
-    {% for sev in ["critical", "high", "medium", "low", "info"] %}
-      {% if counts.get(sev) %}
-        <span class="chip" style="background: {{ sev | sev_color }}">{{ sev | capitalize }}: {{ counts[sev] }}</span>
-      {% endif %}
-    {% endfor %}
-    {% if not findings %}<span class="muted">Aucun finding.</span>{% endif %}
+      <div class="filters-bar">
+        <input type="text" id="searchInput" placeholder="🔍 Rechercher (nom, type, outil, preuve)..." class="search-input">
+        <div class="chips">
+          <button class="chip active" data-sev="all" style="background: #475569;">Tous ({{ findings | length }})</button>
+          {% for sev in ["critical", "high", "medium", "low", "info"] %}
+            {% if counts.get(sev) %}
+              <button class="chip" data-sev="{{ sev }}" style="background: {{ sev | sev_color }}">{{ sev | capitalize }}: {{ counts[sev] }}</button>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {% if techs %}
+    <h2>Technologies détectées</h2>
+    <div class="tech-container">
+      {% for t in techs %}<span class="tech">{{ t }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="section-title">
+      <h2>Findings (<span id="matchCount">{{ findings | length }}</span> / {{ findings | length }})</h2>
+    </div>
+
+    <div class="table-container">
+      <table id="findingsTable">
+        <thead>
+          <tr><th>Sévérité</th><th>Type</th><th>Nom</th><th>Outil</th><th>Preuve</th></tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          <tr data-sev="{{ f.severity | lower }}">
+            <td><span class="sev" style="background: {{ f.severity | sev_color }}">{{ f.severity | capitalize }}</span></td>
+            <td>{{ f.type }}</td>
+            <td>{{ f.name }}</td>
+            <td>{{ f.tool }}</td>
+            <td class="mono muted">{{ f.evidence }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="muted" style="text-align: center; padding: 3rem;">Aucun finding trouvé.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-title">
+      <h2>Étapes du workflow</h2>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr><th>Étape</th><th>Outil</th><th>Code de sortie</th><th>Findings</th></tr>
+        </thead>
+        <tbody>
+          {% for o in report.outcomes %}
+          <tr>
+            <td class="mono">{{ o.step_id }}</td>
+            <td>{{ o.tool }}</td>
+            <td>{% if o.exit_code == 0 %}<span class="muted">0 (ok)</span>{% else %}<b style="color:#b91c1c">{{ o.exit_code }}</b>{% endif %}</td>
+            <td>{{ o.findings | length }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <footer>Généré par Pentaster le {{ generated_at }} · Usage sur cibles autorisées uniquement.</footer>
   </div>
 
-  {% if techs %}
-  <h2>Technologies détectées</h2>
-  <div>{% for t in techs %}<span class="tech">{{ t }}</span>{% endfor %}</div>
-  {% endif %}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const searchInput = document.getElementById('searchInput');
+      const filterBtns = document.querySelectorAll('.chip[data-sev]');
+      const tableRows = document.querySelectorAll('#findingsTable tbody tr[data-sev]');
+      const countDisplay = document.getElementById('matchCount');
+      let currentSev = 'all';
 
-  <h2>Findings ({{ findings | length }})</h2>
-  <table>
-    <thead>
-      <tr><th>Sévérité</th><th>Type</th><th>Nom</th><th>Outil</th><th>Preuve</th></tr>
-    </thead>
-    <tbody>
-      {% for f in findings %}
-      <tr>
-        <td><span class="sev" style="background: {{ f.severity | sev_color }}">{{ f.severity | capitalize }}</span></td>
-        <td>{{ f.type }}</td>
-        <td>{{ f.name }}</td>
-        <td>{{ f.tool }}</td>
-        <td class="mono muted">{{ f.evidence }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="muted">Aucun finding.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      function filterTable() {
+        const query = (searchInput ? searchInput.value.toLowerCase().trim() : '');
+        let visibleCount = 0;
 
-  <h2>Étapes du workflow</h2>
-  <table>
-    <thead>
-      <tr><th>Étape</th><th>Outil</th><th>Code de sortie</th><th>Findings</th></tr>
-    </thead>
-    <tbody>
-      {% for o in report.outcomes %}
-      <tr>
-        <td class="mono">{{ o.step_id }}</td>
-        <td>{{ o.tool }}</td>
-        <td>{% if o.exit_code == 0 %}<span class="muted">0 (ok)</span>{% else %}<b style="color:#b91c1c">{{ o.exit_code }}</b>{% endif %}</td>
-        <td>{{ o.findings | length }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+        tableRows.forEach(row => {
+          const rowSev = row.getAttribute('data-sev') || '';
+          const rowText = row.textContent.toLowerCase();
 
-  <footer>Généré par Pentaster le {{ generated_at }} · Usage sur cibles autorisées uniquement.</footer>
+          const matchesSev = (currentSev === 'all' || rowSev === currentSev);
+          const matchesQuery = !query || rowText.includes(query);
+
+          if (matchesSev && matchesQuery) {
+            row.classList.remove('hidden-row');
+            visibleCount++;
+          } else {
+            row.classList.add('hidden-row');
+          }
+        });
+
+        if (countDisplay) {
+          countDisplay.textContent = visibleCount;
+        }
+      }
+
+      filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          filterBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentSev = btn.getAttribute('data-sev');
+          filterTable();
+        });
+      });
+
+      if (searchInput) {
+        searchInput.addEventListener('input', filterTable);
+      }
+    });
+  </script>
 </body>
 </html>

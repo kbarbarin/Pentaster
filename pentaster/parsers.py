@@ -101,12 +101,31 @@ def parse_nuclei(stdout: str, target: str) -> list[Finding]:
     return findings
 
 
+def parse_techniques(stdout: str, target: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for obj in _iter_json_lines(stdout):
+        findings.append(
+            Finding(
+                tool="techniques",
+                target=target,
+                type="vulnerability",
+                severity=obj.get("severity", "medium"),
+                name=obj.get("technique", "Unknown Technique"),
+                evidence=f"{obj.get('url', '')} — {obj.get('evidence', '')}".strip(" —"),
+                raw=obj,
+            )
+        )
+    return findings
+
+
 PARSERS: dict[str, Callable[[str, str], list[Finding]]] = {
     "httpx": parse_httpx,
     "ffuf": parse_ffuf,
     "nuclei": parse_nuclei,
+    "techniques": parse_techniques,
 }
 
 
 def get_parser(name: str) -> Callable[[str, str], list[Finding]]:
     return PARSERS[name]
+

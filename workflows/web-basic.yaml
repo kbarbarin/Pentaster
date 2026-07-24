@@ -21,3 +21,11 @@ steps:
     depends_on: [probe]
     args: ["-u", "{{target}}", "-jsonl", "-severity", "low,medium,high,critical"]
     parser: nuclei
+
+  - id: techniques
+    tool: techniques
+    image: internal
+    depends_on: [probe]
+    args: []
+    parser: techniques
+

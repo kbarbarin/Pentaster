@@ -48,10 +48,16 @@
       color: var(--text-main);
       letter-spacing: -0.025em;
     }
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 2.5rem 0 1rem 0.5rem;
+    }
     h2 { 
       font-size: 1.25rem; 
       font-weight: 600;
-      margin: 2.5rem 0 1rem 0.5rem; 
+      margin: 0; 
       color: var(--text-main);
     }
     .meta { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.5rem; }
@@ -63,7 +69,32 @@
       font-weight: 600;
       border: 1px solid var(--border-color);
     }
-    .chips { margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .filters-bar {
+      margin-top: 1.5rem;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      padding: 0.55rem 1rem;
+      border-radius: 9999px;
+      border: 1px solid var(--border-color);
+      font-family: inherit;
+      font-size: 0.875rem;
+      outline: none;
+      min-width: 280px;
+      background: var(--bg-body);
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+    .chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
     .chip { 
       color: #fff; 
       padding: 0.4rem 1rem; 
@@ -71,12 +102,20 @@
       font-size: 0.85rem; 
       font-weight: 600;
       box-shadow: var(--shadow-sm);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-      cursor: default;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      border: none;
+      cursor: pointer;
+      opacity: 0.7;
     }
     .chip:hover {
-      transform: translateY(-2px);
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+    .chip.active {
+      opacity: 1;
+      transform: scale(1.05);
       box-shadow: var(--shadow-md);
+      outline: 2px solid var(--text-main);
     }
     .table-container {
       background: var(--bg-surface);
@@ -106,6 +145,9 @@
     }
     tbody tr:last-child td {
       border-bottom: none;
+    }
+    tr.hidden-row {
+      display: none !important;
     }
     .sev { 
       color: #fff; 
@@ -139,25 +181,31 @@
         <b>Généré le :</b> {{ generated_at }}
       </p>
 
-      <div class="chips">
-        {% for sev in ["critical", "high", "medium", "low", "info"] %}
-          {% if counts.get(sev) %}
-            <span class="chip" style="background: {{ sev | sev_color }}">{{ sev | capitalize }}: {{ counts[sev] }}</span>
-          {% endif %}
-        {% endfor %}
-        {% if not findings %}<span class="muted">Aucun finding.</span>{% endif %}
+      <div class="filters-bar">
+        <input type="text" id="searchInput" placeholder="🔍 Rechercher (nom, URL, preuve)..." class="search-input">
+        <div class="chips">
+          <button class="chip active" data-sev="all" style="background: #475569;">Tous ({{ findings | length }})</button>
+          {% for sev in ["critical", "high", "medium", "low", "info"] %}
+            {% if counts.get(sev) %}
+              <button class="chip" data-sev="{{ sev }}" style="background: {{ sev | sev_color }}">{{ sev | capitalize }}: {{ counts[sev] }}</button>
+            {% endif %}
+          {% endfor %}
+        </div>
       </div>
     </div>
 
-    <h2>Findings ({{ findings | length }})</h2>
+    <div class="section-title">
+      <h2>Findings (<span id="matchCount">{{ findings | length }}</span> / {{ findings | length }})</h2>
+    </div>
+
     <div class="table-container">
-      <table>
+      <table id="findingsTable">
         <thead>
           <tr><th>Sévérité</th><th>Technique</th><th>URL</th><th>Preuve</th></tr>
         </thead>
         <tbody>
           {% for f in findings %}
-          <tr>
+          <tr data-sev="{{ f.severity | lower }}">
             <td><span class="sev" style="background: {{ f.severity | sev_color }}">{{ f.severity | capitalize }}</span></td>
             <td>{{ f.technique }}</td>
             <td class="mono">{{ f.url }}</td>
@@ -172,5 +220,52 @@
 
     <footer>Généré par Pentaster le {{ generated_at }} · Usage sur cibles autorisées uniquement.</footer>
   </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const searchInput = document.getElementById('searchInput');
+      const filterBtns = document.querySelectorAll('.chip[data-sev]');
+      const tableRows = document.querySelectorAll('#findingsTable tbody tr[data-sev]');
+      const countDisplay = document.getElementById('matchCount');
+      let currentSev = 'all';
+
+      function filterTable() {
+        const query = (searchInput ? searchInput.value.toLowerCase().trim() : '');
+        let visibleCount = 0;
+
+        tableRows.forEach(row => {
+          const rowSev = row.getAttribute('data-sev') || '';
+          const rowText = row.textContent.toLowerCase();
+
+          const matchesSev = (currentSev === 'all' || rowSev === currentSev);
+          const matchesQuery = !query || rowText.includes(query);
+
+          if (matchesSev && matchesQuery) {
+            row.classList.remove('hidden-row');
+            visibleCount++;
+          } else {
+            row.classList.add('hidden-row');
+          }
+        });
+
+        if (countDisplay) {
+          countDisplay.textContent = visibleCount;
+        }
+      }
+
+      filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          filterBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentSev = btn.getAttribute('data-sev');
+          filterTable();
+        });
+      });
+
+      if (searchInput) {
+        searchInput.addEventListener('input', filterTable);
+      }
+    });
+  </script>
 </body>
 </html>

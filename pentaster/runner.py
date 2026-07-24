@@ -46,6 +46,15 @@ class DockerRunner:
         ]
 
     def run(self, step: Step, target: str) -> RunResult:
+        if step.image == "internal" or step.tool == "techniques":
+            from dataclasses import asdict
+            import json
+            from .techniques import run_techniques
+            res = run_techniques(target)
+            lines = [json.dumps(asdict(f)) for f in res.get("findings", [])]
+            return RunResult(step_id=step.id, stdout="\n".join(lines), stderr="", exit_code=0)
+
         argv = self.build_command(step, target)
         stdout, stderr, code = self._run_docker(argv)
         return RunResult(step_id=step.id, stdout=stdout, stderr=stderr, exit_code=code)
+
