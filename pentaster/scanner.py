@@ -41,6 +41,7 @@ def run_full_scan(
     do_auth: bool = True,
     now: Callable[[], str] = _now_iso,
     progress: Optional[Progress] = None,
+    connect: Optional[Callable[[str, int], bool]] = None,
 ) -> ScanReport:
     """Exécute le pipeline complet contre `target` (autorisé par `guard`)."""
     if not guard.is_authorized(target):
@@ -65,7 +66,7 @@ def run_full_scan(
     emit("recon", "start")
     try:
         recon = run_recon(target, guard=guard, wordlists_dir=wordlists_dir,
-                          docker_fn=docker_fn, progress=fwd)
+                          docker_fn=docker_fn, progress=fwd, connect=connect)
         emit("recon", "done", f"{len(recon.services)} service(s), {len(recon.tech)} techno(s)")
     except Exception as exc:  # noqa: BLE001 - une phase ne doit jamais avorter le scan
         recon = ReconResult(host=guard.host_of(target) or target)

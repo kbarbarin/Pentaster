@@ -5,6 +5,14 @@ import pytest
 from pentaster.scanner import run_full_scan
 from pentaster.scope import ScopeError, ScopeGuard
 
+
+@pytest.fixture(autouse=True)
+def _no_real_tcp(monkeypatch):
+    # Neutralise le scan TCP natif (sinon il tenterait de vraies connexions).
+    monkeypatch.setattr("pentaster.recon._socket_connect",
+                        lambda h, p, timeout=0.6: False)
+
+
 ORIGIN = "http://localhost:3000"
 
 NMAP_XML = """<?xml version="1.0"?>

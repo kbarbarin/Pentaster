@@ -1,5 +1,36 @@
-from pentaster.recon import parse_nmap_xml, run_recon
+import pytest
+
+from pentaster.recon import parse_nmap_xml, run_recon, tcp_port_scan
 from pentaster.scope import ScopeGuard
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tcp(monkeypatch):
+    # Par défaut, aucun port TCP réel ne répond (tests hermétiques). Les tests
+    # qui veulent exercer le scan TCP passent leur propre `connect`.
+    monkeypatch.setattr("pentaster.recon._socket_connect",
+                        lambda h, p, timeout=0.6: False)
+
+
+def test_tcp_port_scan_finds_open_ports():
+    # `connect` factice : seul le port 3000 est "ouvert".
+    services = tcp_port_scan("localhost", [22, 80, 3000],
+                             connect=lambda h, p: p == 3000)
+    assert [s.port for s in services] == [3000]
+    assert services[0].name == "http-dev" and services[0].state == "open"
+
+
+def test_run_recon_merges_tcp_scan(monkeypatch):
+    # nmap ne renvoie rien ; le scan TCP (injecté) trouve le port 3000.
+    monkeypatch.setattr("pentaster.recon._socket_connect",
+                        lambda h, p, timeout=0.6: p == 3000)
+
+    def fake_docker(argv):
+        return ("", "", 1)   # nmap + httpx échouent → seul le TCP scan trouve
+
+    r = run_recon("http://localhost:3000", guard=ScopeGuard([]),
+                  wordlists_dir="/tmp", docker_fn=fake_docker)
+    assert 3000 in [s.port for s in r.services]
 
 
 NMAP_XML = """<?xml version="1.0"?>
