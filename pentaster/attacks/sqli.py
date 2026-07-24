@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
+from .base import MAX_TARGETS_PER_MODULE
 from ._util import merged_login_targets, merged_param_targets, with_query_param
 
 SQLI_PAYLOADS = ["' OR '1'='1'--", "' OR true--", "admin'--", "') OR ('1'='1"]
@@ -26,13 +27,18 @@ COMMON_PARAMS = ["q", "search", "id", "email", "name"]
 
 
 def t_sqli_auth_bypass(ctx) -> list[Finding]:
+    """Sonde CHAQUE cible de login découverte/repli et confirme toutes les
+    instances vulnérables (pas seulement la première) — un login bypass SQLi
+    par cible au plus, dès la première combinaison payload/champ concluante."""
     out: list[Finding] = []
     targets = merged_login_targets(ctx.sitemap, ctx.origin, LOGIN_ENDPOINTS)
+    targets = targets[:MAX_TARGETS_PER_MODULE]
     for action, field_names in targets:
         base_st, _, _ = ctx.safe_post(action, data={"email": "nobody@nope.tld",
                                                       "password": "definitely-wrong-xyz"})
         if base_st in (-1, 404):
             continue
+        finding = None
         for pl in SQLI_PAYLOADS:
             for field_name in field_names:
                 st, _, body = ctx.safe_post(action, data={field_name: pl, "password": pl})
@@ -40,17 +46,24 @@ def t_sqli_auth_bypass(ctx) -> list[Finding]:
                 ok = st == 200 and ("token" in low or "authentication" in low
                                     or "jwt" in low or "sessionid" in low)
                 if ok and st != base_st:
-                    out.append(Finding("sqli", "sqli-auth-bypass", "critical", action,
-                                       f"Payload `{pl}` sur `{field_name}` -> 200 + jeton (réf. {base_st})",
-                                       request=f"POST {action}"))
-                    return out
+                    finding = Finding("sqli", "sqli-auth-bypass", "critical", action,
+                                      f"Payload `{pl}` sur `{field_name}` -> 200 + jeton (réf. {base_st})",
+                                      request=f"POST {action}")
+                    break
+            if finding:
+                break
+        if finding:
+            out.append(finding)
     return out
 
 
 def t_error_based_sqli(ctx) -> list[Finding]:
+    """Sonde CHAQUE (endpoint, paramètre) découvert/repli et confirme toutes
+    les instances vulnérables (une signature d'erreur SQL par cible)."""
     out: list[Finding] = []
     targets = merged_param_targets(ctx.sitemap, ctx.origin,
                                    COMMON_SEARCH_ENDPOINTS, COMMON_PARAMS)
+    targets = targets[:MAX_TARGETS_PER_MODULE]
     for base_url, param in targets:
         target = with_query_param(base_url, param, "'")
         st, _, body = ctx.safe_get(target)
@@ -60,7 +73,6 @@ def t_error_based_sqli(ctx) -> list[Finding]:
             out.append(Finding("sqli", "sqli-error-based", "high", target,
                                f"Signature d'erreur SQL renvoyée (param `{param}`)",
                                request=f"GET {target}"))
-            return out
     return out
 
 

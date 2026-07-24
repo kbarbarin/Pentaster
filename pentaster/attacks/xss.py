@@ -7,6 +7,7 @@ from __future__ import annotations
 import secrets
 
 from ..scan_models import Finding
+from .base import MAX_TARGETS_PER_MODULE
 from ._util import ci_header, merged_param_targets, with_query_param
 
 # Repli intégré : endpoints/paramètres courants toujours sondés, même sans
@@ -21,8 +22,12 @@ def _fresh_payload() -> tuple[str, str]:
 
 
 def t_reflected_xss(ctx) -> list[Finding]:
+    """Sonde CHAQUE (endpoint, paramètre) découvert/repli et confirme toutes
+    les réflexions non encodées (pas seulement la première)."""
+    out: list[Finding] = []
     _marker, payload = _fresh_payload()
     targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS, COMMON_PARAMS)
+    targets = targets[:MAX_TARGETS_PER_MODULE]
     for base_url, param in targets:
         target = with_query_param(base_url, param, payload)
         st, headers, body = ctx.safe_get(target)
@@ -35,13 +40,17 @@ def t_reflected_xss(ctx) -> list[Finding]:
         # Contrôle négatif : le payload ne doit PAS apparaître dans la page
         # « propre » (sans injection) — sinon ce serait du contenu statique.
         if payload not in (base_body or ""):
-            return [Finding("xss", "reflected-xss", "medium", target,
-                            f"Marqueur réfléchi sans encodage (param `{param}`)",
-                            request=f"GET {target}")]
-    return []
+            out.append(Finding("xss", "reflected-xss", "medium", target,
+                               f"Marqueur réfléchi sans encodage (param `{param}`)",
+                               request=f"GET {target}"))
+    return out
 
 
 def t_stored_xss(ctx) -> list[Finding]:
+    """Soumet le marqueur via chaque formulaire découvert, puis confirme
+    TOUTES les pages sur lesquelles il persiste sans encodage (pas
+    seulement la première relecture)."""
+    out: list[Finding] = []
     _marker, payload = _fresh_payload()
     submitted = False
     for form in ctx.sitemap.forms:
@@ -52,18 +61,18 @@ def t_stored_xss(ctx) -> list[Finding]:
         if st != -1:
             submitted = True
     if not submitted:
-        return []
+        return out
 
-    check_urls = [ctx.origin] + [ep.url for ep in ctx.sitemap.endpoints[:5]]
+    check_urls = [ctx.origin] + [ep.url for ep in ctx.sitemap.endpoints[:MAX_TARGETS_PER_MODULE]]
     for url in check_urls:
         st, headers, body = ctx.safe_get(url)
         ct = ci_header(headers, "content-type").lower()
         if st == 200 and "html" in ct and payload in (body or ""):
-            return [Finding("xss", "stored-xss", "high", url,
-                            "Marqueur soumis via un formulaire retrouvé persistant "
-                            "(sans encodage) sur une page relue",
-                            request=f"GET {url}")]
-    return []
+            out.append(Finding("xss", "stored-xss", "high", url,
+                               "Marqueur soumis via un formulaire retrouvé persistant "
+                               "(sans encodage) sur une page relue",
+                               request=f"GET {url}"))
+    return out
 
 
 ATTACKS = [

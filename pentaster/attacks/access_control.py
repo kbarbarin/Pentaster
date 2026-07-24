@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
+from .base import MAX_TARGETS_PER_MODULE
 
 NUM_SEG = re.compile(r"/(\d+)(?=$|[/?])")
 
@@ -22,14 +23,22 @@ def _neighbor(url: str, m: re.Match, delta: int) -> str | None:
 
 
 def t_idor(ctx) -> list[Finding]:
+    """Sonde CHAQUE endpoint à segment numérique découvert et confirme TOUTES
+    les instances IDOR (pas seulement la première)."""
+    out: list[Finding] = []
     seen = set()
-    for ep in list(ctx.sitemap.endpoints) + list(ctx.sitemap.api_endpoints):
+    endpoints = list(ctx.sitemap.endpoints) + list(ctx.sitemap.api_endpoints)
+    checked = 0
+    for ep in endpoints:
         if ep.method.upper() != "GET" or ep.url in seen:
             continue
         matches = list(NUM_SEG.finditer(ep.url))
         if not matches:
             continue
         seen.add(ep.url)
+        checked += 1
+        if checked > MAX_TARGETS_PER_MODULE:
+            break
         m = matches[-1]
 
         base_st, _, base_body = ctx.safe_get(ep.url)
@@ -43,12 +52,13 @@ def t_idor(ctx) -> list[Finding]:
             st, _, body = ctx.safe_get(other_url)
             if st == 200 and (body or "").strip() and body != base_body:
                 sign = "+" if delta > 0 else ""
-                return [Finding("access-control", "idor-object-id-enumeration", "high",
-                                other_url,
-                                f"Objet voisin (id {sign}{delta}) accessible avec un contenu "
-                                "distinct de la référence authentifiée",
-                                request=f"GET {other_url}")]
-    return []
+                out.append(Finding("access-control", "idor-object-id-enumeration", "high",
+                                   other_url,
+                                   f"Objet voisin (id {sign}{delta}) accessible avec un contenu "
+                                   "distinct de la référence authentifiée",
+                                   request=f"GET {other_url}"))
+                break
+    return out
 
 
 ATTACKS = [

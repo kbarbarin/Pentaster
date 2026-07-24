@@ -239,6 +239,132 @@ def test_run_full_scan_crawl_failure_does_not_abort_scan(monkeypatch):
     assert report.finished_at == "t"
 
 
+NUCLEI_JSONL = (
+    '{"template-id":"exposed-panel","info":{"name":"Admin panel exposed","severity":"medium"},'
+    '"matched-at":"http://localhost:3000/admin"}\n'
+)
+
+CHALLENGES_BODY = (
+    '{"status":"success","data":[{"name":"Login Admin","solved":false},'
+    '{"name":"CSRF","solved":false}]}'
+)
+
+
+def fake_docker_dispatch_with_nuclei(argv):
+    if any("nmap" in a for a in argv):
+        return (NMAP_XML, "", 0)
+    if any("httpx" in a for a in argv):
+        return (HTTPX_JSON, "", 0)
+    if any("nuclei" in a for a in argv):
+        return (NUCLEI_JSONL, "", 0)
+    return ("", "unknown image", 1)
+
+
+def test_run_full_scan_nuclei_phase_adds_findings():
+    guard = ScopeGuard(["localhost"])
+    report = run_full_scan(
+        ORIGIN,
+        guard=guard,
+        wordlists_dir="/w",
+        docker_fn=fake_docker_dispatch_with_nuclei,
+        http_factory=make_http_factory(),
+        now=lambda: "t",
+    )
+    nuclei_findings = [f for f in report.findings if f.category == "nuclei"]
+    assert len(nuclei_findings) == 1
+    assert nuclei_findings[0].technique == "Admin panel exposed"
+    assert nuclei_findings[0].severity == "medium"
+    events = {(ev.phase, ev.event) for ev in report.timeline}
+    assert ("nuclei", "start") in events
+    assert ("nuclei", "done") in events
+
+
+def test_run_full_scan_exploit_phase_confirms_challenges_when_detected():
+    script = make_script()
+    script[f"{ORIGIN}/api/Challenges/"] = (200, {}, CHALLENGES_BODY)
+
+    calls = []
+
+    def fake_solve_fn(base_url, progress=None):
+        calls.append(base_url)
+        return {
+            "before": 0, "after": 2, "total": 2,
+            "newly_solved": ["Login Admin", "CSRF"],
+            "ran": [("Login Admin", True), ("CSRF", True)],
+        }
+
+    guard = ScopeGuard(["localhost"])
+    report = run_full_scan(
+        ORIGIN,
+        guard=guard,
+        wordlists_dir="/w",
+        docker_fn=fake_docker_dispatch,
+        http_factory=make_http_factory(script),
+        solve_fn=fake_solve_fn,
+        now=lambda: "t",
+    )
+    assert calls == [ORIGIN]
+    exploit_findings = [f for f in report.findings if f.category == "exploit"]
+    assert len(exploit_findings) == 2
+    assert {f.technique for f in exploit_findings} == {"Login Admin", "CSRF"}
+    assert all(f.confirmed and f.severity == "high" for f in exploit_findings)
+    events = {(ev.phase, ev.event) for ev in report.timeline}
+    assert ("exploit", "start") in events
+    assert ("exploit", "done") in events
+
+
+def test_run_full_scan_exploit_phase_skipped_when_not_juice_shop_like():
+    """Cible générique (pas d'API /api/Challenges/) : le solveur d'exploit
+    n'est JAMAIS invoqué et aucun finding 'exploit' n'apparaît."""
+    called = []
+
+    def fake_solve_fn(base_url, progress=None):
+        called.append(base_url)
+        return {"newly_solved": ["should-not-appear"], "ran": []}
+
+    guard = ScopeGuard(["localhost"])
+    report = run_full_scan(
+        ORIGIN,
+        guard=guard,
+        wordlists_dir="/w",
+        docker_fn=fake_docker_dispatch,
+        http_factory=make_http_factory(),
+        solve_fn=fake_solve_fn,
+        now=lambda: "t",
+    )
+    assert called == []
+    assert [f for f in report.findings if f.category == "exploit"] == []
+
+
+def test_run_full_scan_deep_false_skips_nuclei_and_exploit_phases():
+    called = []
+
+    def fake_solve_fn(base_url, progress=None):
+        called.append(base_url)
+        return {"newly_solved": [], "ran": []}
+
+    script = make_script()
+    script[f"{ORIGIN}/api/Challenges/"] = (200, {}, CHALLENGES_BODY)
+
+    guard = ScopeGuard(["localhost"])
+    report = run_full_scan(
+        ORIGIN,
+        guard=guard,
+        wordlists_dir="/w",
+        docker_fn=fake_docker_dispatch_with_nuclei,
+        http_factory=make_http_factory(script),
+        solve_fn=fake_solve_fn,
+        now=lambda: "t",
+        deep=False,
+    )
+    assert called == []
+    assert [f for f in report.findings if f.category == "nuclei"] == []
+    assert [f for f in report.findings if f.category == "exploit"] == []
+    events = {(ev.phase, ev.event) for ev in report.timeline}
+    assert ("nuclei", "skipped") in events
+    assert ("exploit", "skipped") in events
+
+
 def test_run_full_scan_attack_failure_does_not_abort_scan(monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("attacks exploded")

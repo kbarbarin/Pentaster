@@ -39,6 +39,9 @@ def t_cors_misconfig(ctx) -> list[Finding]:
 
 
 def t_verbose_errors(ctx) -> list[Finding]:
+    """Sonde CHAQUE endpoint découvert et confirme TOUTES les divulgations
+    d'erreur verbeuse (pas seulement la première)."""
+    out: list[Finding] = []
     endpoints = [ep.url for ep in list(ctx.sitemap.endpoints) + list(ctx.sitemap.api_endpoints)]
     if not endpoints:
         endpoints = [ctx.origin.rstrip("/") + "/api/not-a-number"]
@@ -46,10 +49,10 @@ def t_verbose_errors(ctx) -> list[Finding]:
         probe = url.rstrip("/") + "/@@@"
         st, _, body = ctx.safe_get(probe)
         if st >= 400 and VERBOSE_RE.search((body or "")[:4000]):
-            return [Finding("misconfig", "verbose-error-disclosure", "low", probe,
-                            "Trace/erreur interne divulguée sur entrée invalide",
-                            request=f"GET {probe}")]
-    return []
+            out.append(Finding("misconfig", "verbose-error-disclosure", "low", probe,
+                               "Trace/erreur interne divulguée sur entrée invalide",
+                               request=f"GET {probe}"))
+    return out
 
 
 ATTACKS = [

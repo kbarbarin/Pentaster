@@ -57,7 +57,7 @@ def test_reflected_xss_detects_unencoded_reflection():
     sitemap = SiteMap(origin=ORIGIN, params={f"{ORIGIN}/search": {"q"}})
     ctx = make_ctx(sitemap, ReflectHttp(escape=False))
     findings = t_reflected_xss(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "xss"
     assert findings[0].severity == "medium"
 
@@ -74,7 +74,7 @@ def test_reflected_xss_builtin_fallback_when_sitemap_empty():
     sitemap = SiteMap(origin=ORIGIN)
     ctx = make_ctx(sitemap, ReflectHttp(escape=False))
     findings = t_reflected_xss(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "xss"
 
 
@@ -87,7 +87,7 @@ def test_stored_xss_detects_persistent_marker():
     )
     ctx = make_ctx(sitemap, ReflectHttp(escape=False))
     findings = t_stored_xss(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "xss"
     assert findings[0].severity == "high"
 

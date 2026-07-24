@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ..scan_models import Finding
-from .base import AttackContext
+from .base import AttackContext, dedup_findings
 
 from . import (  # noqa: E402  (registre rempli après les imports)
     access_control,
@@ -53,6 +53,7 @@ def run_attacks(ctx: AttackContext,
         findings.extend(res)
         if progress:
             progress("attack", "done", (name, len(res)))
+    findings = dedup_findings(findings)
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings.sort(key=lambda f: order.get(f.severity, 5))
     return findings

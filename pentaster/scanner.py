@@ -13,14 +13,16 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from .attacks import run_attacks
-from .attacks.base import SEVERITY_ORDER, AttackContext
+from .attacks.base import SEVERITY_ORDER, AttackContext, dedup_findings
 from .auth import AuthSession, authenticate
 from .crawler import run_crawl
 from .recon import run_recon
 from .runner import DockerFn
 from .scan_models import ReconResult, ScanReport, SiteMap, TimelineEvent
 from .scope import ScopeError
+from .solvers import run_solvers as _default_solve_fn
 from .techniques import Http
+from .vulnscan import run_exploit_phase, run_nuclei
 
 Progress = Callable[[str, str, object], None]
 
@@ -39,6 +41,8 @@ def run_full_scan(
     max_pages: int = 100,
     max_depth: int = 3,
     do_auth: bool = True,
+    deep: bool = True,
+    solve_fn: Optional[Callable[..., dict]] = None,
     now: Callable[[], str] = _now_iso,
     progress: Optional[Progress] = None,
     connect: Optional[Callable[[str, int], bool]] = None,
@@ -108,6 +112,35 @@ def run_full_scan(
         findings = []
         emit("attack", "error", f"attaques en échec : {exc}")
 
+    # -- 5. Nuclei (couverture générique élargie) ---------------------------
+    nuclei_findings: list = []
+    if deep:
+        emit("nuclei", "start")
+        try:
+            nuclei_findings = run_nuclei(origin, wordlists_dir=wordlists_dir,
+                                         docker_fn=docker_fn, progress=fwd)
+            emit("nuclei", "done", f"{len(nuclei_findings)} finding(s)")
+        except Exception as exc:  # noqa: BLE001
+            nuclei_findings = []
+            emit("nuclei", "error", f"nuclei en échec : {exc}")
+    else:
+        emit("nuclei", "skipped")
+
+    # -- 6. Exploit (auto-détecté : confirme les vulnérabilités RÉELLES) ---
+    exploit_findings: list = []
+    if deep:
+        emit("exploit", "start")
+        try:
+            exploit_findings = run_exploit_phase(
+                origin, http, solve_fn=solve_fn or _default_solve_fn, progress=fwd)
+            emit("exploit", "done", f"{len(exploit_findings)} finding(s)")
+        except Exception as exc:  # noqa: BLE001
+            exploit_findings = []
+            emit("exploit", "error", f"exploit en échec : {exc}")
+    else:
+        emit("exploit", "skipped")
+
+    findings = dedup_findings(findings + nuclei_findings + exploit_findings)
     findings = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 5))
 
     finished = now()

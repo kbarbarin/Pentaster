@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 
 from ..scan_models import Finding
+from .base import MAX_TARGETS_PER_MODULE
 
 XXE_PAYLOAD = (
     '<?xml version="1.0"?>\n'
@@ -31,14 +32,19 @@ def _xml_targets(sitemap):
 
 
 def t_xxe(ctx) -> list[Finding]:
-    for url in _xml_targets(ctx.sitemap):
+    """Sonde CHAQUE endpoint XML/upload découvert et confirme TOUTES les
+    instances XXE (pas seulement la première)."""
+    out: list[Finding] = []
+    for i, url in enumerate(_xml_targets(ctx.sitemap)):
+        if i >= MAX_TARGETS_PER_MODULE:
+            break
         st, _, body = ctx.safe_post(url, data=XXE_PAYLOAD,
                                     headers={"Content-Type": "application/xml"}, raw=True)
         if st == 200 and PASSWD_RE.search(body or ""):
-            return [Finding("xxe", "xml-external-entity", "critical", url,
-                            "Contenu de /etc/passwd divulgué via entité externe XML",
-                            request=f"POST {url}")]
-    return []
+            out.append(Finding("xxe", "xml-external-entity", "critical", url,
+                               "Contenu de /etc/passwd divulgué via entité externe XML",
+                               request=f"POST {url}"))
+    return out
 
 
 ATTACKS = [

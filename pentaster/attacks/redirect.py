@@ -3,6 +3,7 @@ dont le nom évoque une destination de redirection."""
 from __future__ import annotations
 
 from ..scan_models import Finding
+from .base import MAX_TARGETS_PER_MODULE
 from ._util import merged_param_targets, with_query_param
 
 REDIRECT_PARAM_HINTS = ("redirect", "url", "to", "next", "returnurl", "dest",
@@ -16,8 +17,12 @@ COMMON_ENDPOINTS = ["/", "/login", "/logout", "/redirect"]
 
 
 def t_open_redirect(ctx) -> list[Finding]:
+    """Sonde CHAQUE (endpoint, paramètre-redirection) découvert/repli et
+    confirme TOUTES les instances d'open redirect."""
+    out: list[Finding] = []
     targets = merged_param_targets(ctx.sitemap, ctx.origin, COMMON_ENDPOINTS,
                                    REDIRECT_PARAM_HINTS)
+    targets = targets[:MAX_TARGETS_PER_MODULE]
     for base_url, param in targets:
         if param.lower() not in REDIRECT_PARAM_HINTS:
             continue
@@ -25,10 +30,10 @@ def t_open_redirect(ctx) -> list[Finding]:
         st, headers, _ = ctx.safe_get(target)
         loc = {k.lower(): v for k, v in (headers or {}).items()}.get("location", "")
         if EVIL in loc:
-            return [Finding("redirect", "open-redirect", "medium", target,
-                            f"Redirection (Location) vers une URL externe via `{param}`",
-                            request=f"GET {target}")]
-    return []
+            out.append(Finding("redirect", "open-redirect", "medium", target,
+                               f"Redirection (Location) vers une URL externe via `{param}`",
+                               request=f"GET {target}"))
+    return out
 
 
 ATTACKS = [

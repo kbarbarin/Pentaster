@@ -60,7 +60,7 @@ def test_idor_detects_distinct_neighbor_object():
                      (200, {}, '{"id":41,"owner":"bob","total":55}')))
     ctx = make_ctx(sitemap, http)
     findings = t_idor(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "access-control"
     assert findings[0].severity == "high"
 
@@ -99,7 +99,7 @@ def test_default_credentials_detects_admin_admin():
             .when_post(lambda p, kw: True, (401, {}, "invalid")))
     ctx = make_ctx(sitemap, http)
     findings = t_default_credentials(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "auth"
     assert findings[0].severity == "high"
 
@@ -125,7 +125,7 @@ def test_default_credentials_builtin_fallback_when_sitemap_empty():
             .when_post(lambda p, kw: True, (401, {}, "invalid")))
     ctx = make_ctx(sitemap, http)
     findings = t_default_credentials(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "auth"
 
 
@@ -139,7 +139,7 @@ def test_jwt_none_alg_accepted_by_protected_endpoint():
             .when_get(lambda p, kw: True, (401, {}, "unauthorized")))
     ctx = make_ctx(sitemap, http)
     findings = t_jwt_none_alg(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "auth"
     assert findings[0].severity == "high"
 
@@ -163,7 +163,7 @@ def test_jwt_none_alg_builtin_fallback_when_sitemap_empty():
             .when_get(lambda p, kw: True, (401, {}, "unauthorized")))
     ctx = make_ctx(sitemap, http)
     findings = t_jwt_none_alg(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "auth"
 
 
@@ -173,7 +173,7 @@ def test_mass_assignment_detects_privilege_escalation():
         (201, {}, '{"user":{"email":"x@y.tld","role":"admin"}}'))
     ctx = make_ctx(SiteMap(origin=ORIGIN), http)
     findings = t_mass_assignment(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category in ("auth", "access-control")
     assert findings[0].severity == "high"
     assert findings[0].technique == "mass-assignment-privilege-escalation"
@@ -192,7 +192,7 @@ def test_sensitive_files_detects_dotenv_leak():
                                  (200, {}, "DB_PASSWORD=secret\nAPI_KEY=xyz\n"))
     ctx = make_ctx(SiteMap(origin=ORIGIN), http)
     findings = t_sensitive_files(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "data-exposure"
     assert findings[0].severity == "medium"
 
@@ -208,7 +208,7 @@ def test_null_byte_backup_exposure_detects_bypass():
                                  (200, {}, "PK\x03\x04 binary-ish backup contents"))
     ctx = make_ctx(SiteMap(origin=ORIGIN), http)
     findings = t_null_byte_backup_exposure(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "data-exposure"
 
 
@@ -223,7 +223,7 @@ def test_missing_security_headers_detected():
     http = RoutedHttp().when_get(lambda p, kw: p == "/", (200, {}, "<html></html>"))
     ctx = make_ctx(SiteMap(origin=ORIGIN), http)
     findings = t_security_headers(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "misconfig"
     assert findings[0].severity == "low"
 
@@ -247,7 +247,7 @@ def test_cors_misconfig_detects_reflected_origin():
         (200, {"Access-Control-Allow-Origin": evil}, "<html></html>"))
     ctx = make_ctx(SiteMap(origin=ORIGIN), http)
     findings = t_cors_misconfig(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "misconfig"
     assert findings[0].severity == "medium"
 
@@ -265,7 +265,7 @@ def test_verbose_errors_detects_stack_trace():
         (500, {}, "Traceback (most recent call last):\n  File x, line 1"))
     ctx = make_ctx(sitemap, http)
     findings = t_verbose_errors(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "misconfig"
     assert findings[0].severity == "low"
 
@@ -285,7 +285,7 @@ def test_open_redirect_detects_external_location():
                                  (302, {"Location": evil + "/"}, ""))
     ctx = make_ctx(sitemap, http)
     findings = t_open_redirect(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "redirect"
     assert findings[0].severity == "medium"
 
@@ -306,7 +306,7 @@ def test_open_redirect_builtin_fallback_when_sitemap_empty():
                                  (302, {"Location": evil + "/"}, ""))
     ctx = make_ctx(sitemap, http)
     findings = t_open_redirect(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "redirect"
 
 

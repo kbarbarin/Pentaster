@@ -60,7 +60,7 @@ def test_error_based_sqli_detects_signature():
                                  (200, {}, "SQLITE_ERROR: near \"'\": syntax error"))
     ctx = make_ctx(sitemap, http)
     findings = t_error_based_sqli(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "sqli"
     assert findings[0].severity == "high"
 
@@ -81,7 +81,7 @@ def test_error_based_sqli_builtin_fallback_when_sitemap_empty():
         (200, {}, "SQLITE_ERROR: near \"'\": syntax error"))
     ctx = make_ctx(sitemap, http)
     findings = t_error_based_sqli(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "sqli"
 
 
@@ -94,7 +94,7 @@ def test_sqli_auth_bypass_builtin_fallback_when_sitemap_empty():
             .when_post(lambda p, kw: True, (401, {}, '{"error":"invalid"}')))
     ctx = make_ctx(sitemap, http)
     findings = t_sqli_auth_bypass(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "sqli"
 
 
@@ -113,7 +113,7 @@ def test_sqli_auth_bypass_detects_token_on_payload():
             .when_post(lambda p, kw: True, (401, {}, '{"error":"invalid"}')))
     ctx = make_ctx(sitemap, http)
     findings = t_sqli_auth_bypass(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "sqli"
     assert findings[0].severity == "critical"
 
@@ -144,7 +144,7 @@ def test_nosql_auth_bypass_detects_token_on_operator():
             .when_post(lambda p, kw: True, (401, {}, "invalid")))
     ctx = make_ctx(sitemap, http)
     findings = t_nosql_auth_bypass(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "nosql"
     assert findings[0].severity == "critical"
 
@@ -168,7 +168,7 @@ def test_nosql_auth_bypass_builtin_fallback_when_sitemap_empty():
             .when_post(lambda p, kw: True, (401, {}, "invalid")))
     ctx = make_ctx(sitemap, http)
     findings = t_nosql_auth_bypass(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "nosql"
 
 
@@ -184,7 +184,7 @@ def test_command_injection_detects_id_output():
         (200, {}, "uid=0(root) gid=0(root) groups=0(root)"))
     ctx = make_ctx(sitemap, http)
     findings = t_command_injection(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "cmdi"
     assert findings[0].severity == "critical"
 
@@ -205,7 +205,7 @@ def test_command_injection_builtin_fallback_when_sitemap_empty():
         (200, {}, "uid=0(root) gid=0(root) groups=0(root)"))
     ctx = make_ctx(sitemap, http)
     findings = t_command_injection(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "cmdi"
 
 
@@ -233,7 +233,7 @@ def test_ssti_detects_evaluated_expression():
 
     ctx = make_ctx(sitemap, HandlerHttp())
     findings = t_ssti(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "ssti"
     assert findings[0].severity == "critical"
 
@@ -281,7 +281,7 @@ def test_ssti_builtin_fallback_when_sitemap_empty():
 
     ctx = make_ctx(sitemap, HandlerHttp())
     findings = t_ssti(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "ssti"
 
 
@@ -293,7 +293,7 @@ def test_path_traversal_detects_passwd_leak():
         (200, {}, "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/usr/sbin:/usr/sbin/nologin"))
     ctx = make_ctx(sitemap, http)
     findings = t_path_traversal(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "traversal"
     assert findings[0].severity == "critical"
 
@@ -315,7 +315,7 @@ def test_path_traversal_builtin_fallback_when_sitemap_empty():
         (200, {}, "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/usr/sbin:/usr/sbin/nologin"))
     ctx = make_ctx(sitemap, http)
     findings = t_path_traversal(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "traversal"
 
 
@@ -327,7 +327,7 @@ def test_path_traversal_null_byte_variant_on_endpoint():
         (200, {}, "root:x:0:0:root:/root:/bin/bash"))
     ctx = make_ctx(sitemap, http)
     findings = t_path_traversal(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].technique == "path-traversal-null-byte"
 
 
@@ -341,7 +341,7 @@ def test_xxe_detects_passwd_leak_on_xml_content_type():
         (200, {}, "root:x:0:0:root:/root:/bin/bash"))
     ctx = make_ctx(sitemap, http)
     findings = t_xxe(ctx)
-    assert len(findings) == 1
+    assert len(findings) >= 1
     assert findings[0].category == "xxe"
     assert findings[0].severity == "critical"
 

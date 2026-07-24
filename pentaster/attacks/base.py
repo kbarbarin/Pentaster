@@ -11,11 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..scan_models import SiteMap
+from ..scan_models import Finding, SiteMap
 from ..scope import ScopeGuard
 from ..techniques import Http
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+# Nombre max de cibles sondées par module/appel (SiteMap découverte + repli
+# intégré) — évite un temps d'exécution incontrôlé si le crawl a découvert
+# énormément d'endpoints/paramètres, tout en restant large (« ~60 »).
+MAX_TARGETS_PER_MODULE = 60
 
 
 @dataclass
@@ -67,3 +72,21 @@ def negative_control_confirms(marker: str, positive_body: str, negative_body: st
     """Anti-faux-positif : le `marker` doit apparaître dans la réponse au
     payload actif MAIS PAS dans la réponse de contrôle (payload inerte)."""
     return marker in (positive_body or "") and marker not in (negative_body or "")
+
+
+def dedup_findings(findings: list[Finding]) -> list[Finding]:
+    """Déduplique par (category, technique, url), en gardant la première
+    occurrence (ordre stable) — deux instances confirmées pour la MÊME
+    technique sur la MÊME URL/catégorie ne doivent apparaître qu'une seule
+    fois. Inclure `technique` dans la clé évite d'effacer des instances
+    réellement distinctes qui partagent une URL (ex. plusieurs challenges
+    d'exploit confirmés sur la même cible)."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[Finding] = []
+    for f in findings:
+        key = (f.category, f.technique, f.url)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
