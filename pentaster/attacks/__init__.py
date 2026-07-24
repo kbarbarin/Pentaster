@@ -11,8 +11,26 @@ from typing import Callable
 from ..scan_models import Finding
 from .base import AttackContext
 
-# Registre (category, nom lisible, fonction). Rempli à l'étape « attaques ».
+from . import (  # noqa: E402  (registre rempli après les imports)
+    access_control,
+    auth_broken,
+    cmdi,
+    data_exposure,
+    misconfig,
+    nosql,
+    redirect,
+    sqli,
+    ssti,
+    traversal,
+    xss,
+    xxe,
+)
+
+# Registre (category, nom lisible, fonction) — agrégé depuis chaque module.
 ATTACKS: list[tuple[str, str, Callable[["AttackContext"], list[Finding]]]] = []
+for _mod in (sqli, xss, nosql, cmdi, ssti, traversal, xxe,
+            access_control, auth_broken, data_exposure, misconfig, redirect):
+    ATTACKS.extend(_mod.ATTACKS)
 
 
 def run_attacks(ctx: AttackContext,
