@@ -20,6 +20,8 @@ from .report import SEVERITY_COLOR
 from .report import save_report
 from .results import save_results
 from .runner import DockerRunner
+from .scan_report import group_by_category, save_scan
+from .scanner import run_full_scan
 from .scope import ScopeError, ScopeGuard
 from .solvers import run_solvers
 from .techniques import run_techniques
@@ -348,6 +350,141 @@ def audit(
     with open(html_path, "w", encoding="utf-8") as fh:
         fh.write(_render_audit_html(result))
 
+    console.print(f"\n[green]→[/green] JSON : {json_path}")
+    console.print(f"[green]→[/green] Rapport HTML : {html_path}")
+
+
+def _trunc(s: str, n: int = 70) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+@app.command()
+def scan(
+    target: str = typer.Option(..., "--target", "-t", help="URL/hôte cible (lab autorisé)."),
+    authorized: bool = typer.Option(
+        False, "--authorized", help="Confirme explicitement l'autorisation de tester la cible."),
+    scope: str = typer.Option(None, "--scope", "-s", help="Fichier d'allowlist (défaut : scope.txt)."),
+    out: str = typer.Option(None, "--out", "-o", help="Dossier de sortie (défaut : runs/<timestamp>)."),
+    wordlists: str = typer.Option(None, "--wordlists", "-w", help="Dossier de wordlists monté dans les conteneurs."),
+    templates: str = typer.Option(None, "--templates", help="Dossier des templates de rapport."),
+    max_pages: int = typer.Option(100, "--max-pages", help="Nombre maximum de pages explorées lors du crawl."),
+    max_depth: int = typer.Option(3, "--max-depth", help="Profondeur maximale du crawl."),
+    no_auth: bool = typer.Option(False, "--no-auth", help="Désactive l'authentification automatique avant le crawl."),
+):
+    """Pipeline complet : recon (nmap) → auth → crawl → attaques par catégorie → rapport riche."""
+    try:
+        guard = _load_scope(scope)
+    except typer.BadParameter as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1)
+
+    # Même double garde-fou que `run`/`solve`/`audit` : flag explicite ET appartenance au scope.
+    if not authorized:
+        console.print(Panel.fit(
+            "[bold red]Refus :[/bold red] ajoute le flag [b]--authorized[/b] pour confirmer "
+            "que tu es autorisé à tester cette cible.", border_style="red"))
+        raise typer.Exit(code=2)
+    if not guard.is_authorized(target):
+        console.print(Panel.fit(
+            f"[bold red]Refus :[/bold red] cible hors périmètre → [b]{target}[/b]\n"
+            f"Hôtes autorisés : {', '.join(guard.allowed)}\n"
+            "Ajoute l'hôte à scope.txt si tu y es autorisé.", border_style="red"))
+        raise typer.Exit(code=3)
+
+    wl_dir = os.path.abspath(wordlists or str(_WORDLISTS_DIR))
+    out_dir = out or str(_ROOT / "runs" / datetime.now().strftime("%Y%m%d-%H%M%S"))
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    console.print(Panel.fit(
+        f"[b]Cible[/b] : {target}\n"
+        f"[b]Scope OK[/b] : {guard.host_of(target)}\n"
+        f"[b]Sortie[/b] : {out_dir}", title="Pentaster — Scan", border_style="green"))
+
+    _last_phase: list[str] = [""]
+    _PHASE_TITLE = {
+        "recon": "🛰  Recon (nmap + fingerprint)",
+        "auth": "🔐 Authentification",
+        "crawl": "🕸  Cartographie (crawl)",
+        "attack": "🔎 Attaques par catégorie",
+    }
+
+    def _header(phase: str) -> None:
+        if _last_phase[0] != phase:
+            _last_phase[0] = phase
+            title = _PHASE_TITLE.get(phase, phase)
+            console.print(f"\n[bold cyan]{title}[/bold cyan]")
+
+    def _on_scan(phase, event, payload):
+        _header(phase)
+        if phase == "recon":
+            if event == "port":
+                svc = payload
+                console.print(
+                    f"  [cyan]▪[/cyan] port {svc.port}/{svc.proto} "
+                    f"[dim]{svc.name} {svc.product} {svc.version}[/dim]".rstrip())
+            elif event == "tech":
+                console.print(f"  [green]▪[/green] techno : {payload}")
+        elif phase == "auth":
+            if event == "login-ok":
+                console.print(f"  [green]🔐 login OK[/green] [dim]({payload})[/dim]")
+            elif event == "login-fail":
+                console.print(f"  [yellow]🔐 login échec[/yellow] [dim]({payload})[/dim]")
+        elif phase == "crawl":
+            if event == "endpoint":
+                e = payload
+                console.print(f"  [dim]→ {e.method} {_trunc(e.url)}[/dim]")
+            elif event == "form":
+                f = payload
+                console.print(f"  [dim]⛶ form {f.method} {_trunc(f.action)}[/dim]")
+        elif phase == "attack":
+            if event == "start":
+                _cat, name = payload
+                console.print(f"  [cyan]⚙[/cyan] [dim]{name}…[/dim]")
+            elif event == "done":
+                name, count = payload
+                if count:
+                    console.print(f"     [green]✓ {count} vuln ({name})[/green]")
+
+    try:
+        with console.status("[bold green]Exécution du pipeline de scan…", spinner="dots"):
+            report = run_full_scan(
+                target,
+                guard=guard,
+                wordlists_dir=wl_dir,
+                max_pages=max_pages,
+                max_depth=max_depth,
+                do_auth=not no_auth,
+                progress=_on_scan,
+            )
+    except ScopeError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=3)
+
+    findings = report.findings
+    by_category = group_by_category(findings)
+
+    console.print()
+    table = Table(title=f"Vulnérabilités trouvées — {report.target} ({len(findings)})",
+                  header_style="bold")
+    table.add_column("Catégorie"); table.add_column("Sévérité"); table.add_column("Technique")
+    table.add_column("URL", max_width=55); table.add_column("Preuve", max_width=55)
+    for cat, items in by_category.items():
+        for f in items:
+            style = _SEV_STYLE.get(f.severity.lower(), "white")
+            table.add_row(cat, f"[{style}]{f.severity.upper()}[/]", f.technique, f.url, f.evidence)
+    console.print(table)
+
+    from collections import Counter
+    counts = Counter(f.severity.lower() for f in findings)
+    summary = "   ".join(
+        f"[{_SEV_STYLE.get(s, 'white')}]{counts[s]} {s}[/]"
+        for s in ("critical", "high", "medium", "low", "info") if counts.get(s))
+    if summary:
+        console.print(f"[bold]Résumé :[/bold] {summary}")
+    else:
+        console.print("[green]Aucune vulnérabilité confirmée.[/green]")
+
+    json_path, html_path = save_scan(report, out_dir)
     console.print(f"\n[green]→[/green] JSON : {json_path}")
     console.print(f"[green]→[/green] Rapport HTML : {html_path}")
 
